@@ -22,17 +22,10 @@ class MeteringServerConfig:
 
 
 @dataclass
-class EddyConfig:
-    base_url: str = os.getenv("EDDY_BASE_URL", "http://EDDY_HOST:PORT")
-    username: str = os.getenv("EDDY_USER", "")
-    password: str = os.getenv("EDDY_PASS", "")
-
-
-@dataclass
-class HelpDeskConfig:
-    # Адрес HelpDesk для чтения задач и отправки ответов
-    base_url: str = os.getenv("HELPDESK_BASE_URL", "http://HELPDESK_HOST:PORT")
-    api_key: str = os.getenv("HELPDESK_API_KEY", "")
+class HelpDeskEddyConfig:
+    # Единая система HelpDeskEddy: чтение задач и отправка ответов
+    base_url: str = os.getenv("HELPDESK_EDDY_BASE_URL", "https://support.lar.tech/ru")
+    api_key: str = os.getenv("HELPDESK_EDDY_API_KEY", "")
 
 
 @dataclass
@@ -42,8 +35,7 @@ class AppConfig:
     )
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o")
     metering: MeteringServerConfig = field(default_factory=MeteringServerConfig)
-    eddy: EddyConfig = field(default_factory=EddyConfig)
-    helpdesk: HelpDeskConfig = field(default_factory=HelpDeskConfig)
+    helpdesk_eddy: HelpDeskEddyConfig = field(default_factory=HelpDeskEddyConfig)
     # Максимум ПУ в одной массовой операции (защита от перегрузки)
     max_bulk_size: int = int(os.getenv("MAX_BULK_SIZE", "50"))
     reports_dir: str = os.getenv("REPORTS_DIR", "./reports")

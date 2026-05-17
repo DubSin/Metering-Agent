@@ -37,10 +37,16 @@ class HelpDeskConfig:
 
 @dataclass
 class AppConfig:
-    openai_api_key: str = field(
-        default_factory=lambda: os.getenv("OPENAI_API_KEY", "")
+    # ER-GPT, нативный API v2 (one-shot). Внутренний контур: https://chatbot.lar.tech
+    ergpt_api_key: str = field(
+        default_factory=lambda: os.getenv("ERGPT_API_KEY")
+        or os.getenv("OPENAI_API_KEY", "")
     )
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+    ergpt_base_url: str = os.getenv("ERGPT_BASE_URL", "https://chatbot.lar.tech")
+    ergpt_model: str = os.getenv("ERGPT_MODEL") or os.getenv(
+        "OPENAI_MODEL", "ERGPT-Main"
+    )
+    ergpt_timeout: float = float(os.getenv("ERGPT_TIMEOUT", "120"))
     metering: MeteringServerConfig = field(default_factory=MeteringServerConfig)
     eddy: EddyConfig = field(default_factory=EddyConfig)
     helpdesk: HelpDeskConfig = field(default_factory=HelpDeskConfig)

@@ -42,7 +42,7 @@ class HelpDeskWebhook(BaseModel):
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    return {"ok": True, "model": config.openai_model}
+    return {"ok": True, "model": config.ergpt_model}
 
 
 @app.post("/helpdesk/webhook")

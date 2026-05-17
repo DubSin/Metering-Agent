@@ -16,11 +16,10 @@ import logging
 from datetime import date
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
 from config import config
+from .ergpt_client import ERGPTError, one_shot, one_shot_json
 from tools import (
     build_readings_report,
     build_status_report,
@@ -41,14 +40,6 @@ from .state import MeterRef, ParsedRequest, TaskState
 log = logging.getLogger(__name__)
 
 
-def _llm(temperature: float = 0.0) -> ChatOpenAI:
-    return ChatOpenAI(
-        model=config.openai_model,
-        temperature=temperature,
-        api_key=config.openai_api_key,
-    )
-
-
 # ---------- ноды ----------
 
 async def node_intake(state: TaskState) -> dict:
@@ -62,13 +53,15 @@ async def node_intake(state: TaskState) -> dict:
     else:
         state_patch = {}
 
-    llm = _llm().with_structured_output(ParsedRequest)
     try:
-        parsed: ParsedRequest = await llm.ainvoke([
-            SystemMessage(content=INTAKE_SYSTEM),
-            HumanMessage(content=text),
-        ])
-    except Exception as e:
+        raw = await one_shot_json(
+            content=text,
+            system_prompt=INTAKE_SYSTEM,
+            schema=ParsedRequest.model_json_schema(),
+            temperature=0.0,
+        )
+        parsed = ParsedRequest.model_validate(raw)
+    except (ERGPTError, ValueError) as e:
         log.exception("intake LLM failed")
         return {**state_patch, "parsed": ParsedRequest(), "errors": [f"intake: {e}"]}
 
@@ -255,11 +248,16 @@ async def node_compose_reply(state: TaskState) -> dict:
         "artifacts_count": len(state.get("artifacts", [])),
         "errors": state.get("errors", []),
     }
-    msg = await _llm(temperature=0.2).ainvoke([
-        SystemMessage(content=COMPOSE_REPLY_SYSTEM),
-        HumanMessage(content=json.dumps(summary, ensure_ascii=False, default=str)),
-    ])
-    return {"reply_text": msg.content}
+    try:
+        reply_text = await one_shot(
+            content=json.dumps(summary, ensure_ascii=False, default=str),
+            system_prompt=COMPOSE_REPLY_SYSTEM,
+            temperature=0.2,
+        )
+    except ERGPTError as e:
+        log.exception("compose_reply LLM failed")
+        return {"reply_text": "Заявка обработана.", "errors": [f"compose_reply: {e}"]}
+    return {"reply_text": reply_text}
 
 
 async def node_reply(state: TaskState) -> dict:

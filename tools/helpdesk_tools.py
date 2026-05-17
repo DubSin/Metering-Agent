@@ -1,9 +1,9 @@
 """
-Инструменты работы с HelpDesk: чтение задачи и отправка ответа с вложениями.
+Инструменты работы с HelpDeskEddy: чтение задачи и отправка ответа с вложениями.
 
-Структура webhook/полей зависит от конкретной HelpDesk — оставлен generic-формат,
+Структура webhook/полей зависит от настроек HelpDeskEddy — оставлен generic-формат,
 который ожидает {task_id, author, subject, text, attachments}. Адаптер
-к конкретной системе — TODO(helpdesk_adapter).
+к конкретной системе — TODO(helpdesk_eddy_adapter).
 """
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ log = logging.getLogger(__name__)
 
 def _client() -> httpx.AsyncClient:
     headers = {}
-    if config.helpdesk.api_key:
-        headers["Authorization"] = f"Bearer {config.helpdesk.api_key}"
+    if config.helpdesk_eddy.api_key:
+        headers["Authorization"] = f"Bearer {config.helpdesk_eddy.api_key}"
     return httpx.AsyncClient(
-        base_url=config.helpdesk.base_url,
+        base_url=config.helpdesk_eddy.base_url,
         headers=headers,
         timeout=30,
     )

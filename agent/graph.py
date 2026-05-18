@@ -34,24 +34,72 @@ from tools import (
     send_rejoin,
 )
 
-from .prompts import COMPOSE_REPLY_SYSTEM, INTAKE_SYSTEM
-from .state import MeterRef, ParsedRequest, TaskState
+from .prompts import (
+    CLASSIFY_SYSTEM,
+    COMPOSE_REPLY_SYSTEM,
+    INTAKE_SYSTEM,
+    RAG_INSTRUCTION_SYSTEM,
+)
+from .state import MeterRef, ParsedRequest, TaskState, TicketClassification
 
 log = logging.getLogger(__name__)
 
 
 # ---------- ноды ----------
 
+async def _ensure_text(state: TaskState) -> tuple[str, dict]:
+    """Гарантируем текст тикета: либо из payload, либо тянем из HelpDeskEddy."""
+    text = state.get("raw_text") or ""
+    if text or not state.get("task_id"):
+        return text, {}
+    details = await get_task_details.ainvoke({"task_id": state["task_id"]})
+    text = details.get("text") or details.get("subject") or ""
+    return text, {"raw_payload": {**(state.get("raw_payload") or {}), "fetched": details}}
+
+
+async def node_classify(state: TaskState) -> dict:
+    """LLM решает: типовая (агентский путь) или нетиповая (RAG)."""
+    text, state_patch = await _ensure_text(state)
+
+    if not text:
+        # пустой тикет — отправляем в нетиповые, инженер разберётся
+        cls = TicketClassification(
+            classification="atypical", confidence=1.0, reason="пустой текст тикета"
+        )
+        return {**state_patch, "classification": cls, "raw_text": text}
+
+    try:
+        raw = await one_shot_json(
+            content=text,
+            system_prompt=CLASSIFY_SYSTEM,
+            schema=TicketClassification.model_json_schema(),
+            temperature=0.0,
+        )
+        cls = TicketClassification.model_validate(raw)
+    except (ERGPTError, ValueError) as e:
+        log.exception("classify LLM failed")
+        # при сбое классификатора уводим в RAG: безопаснее отдать инструкцию,
+        # чем дёрнуть Реджойн по ошибочно понятому тикету
+        cls = TicketClassification(
+            classification="atypical", confidence=0.0, reason=f"classifier failed: {e}"
+        )
+
+    log.info(
+        "classify: %s (conf=%.2f) — %s",
+        cls.classification, cls.confidence, cls.reason,
+    )
+    return {**state_patch, "classification": cls, "raw_text": text}
+
+
+def route_after_classify(state: TaskState) -> str:
+    cls = state.get("classification") or TicketClassification()
+    return "intake" if cls.classification == "typical" else "rag"
+
+
 async def node_intake(state: TaskState) -> dict:
     """Разбираем текст заявки в ParsedRequest через LLM (structured output)."""
     text = state.get("raw_text") or ""
-    if not text and state.get("task_id"):
-        # текст не пришёл с webhook — дотягиваем из HelpDesk
-        details = await get_task_details.ainvoke({"task_id": state["task_id"]})
-        text = details.get("text") or details.get("subject") or ""
-        state_patch: dict = {"raw_payload": {**(state.get("raw_payload") or {}), "fetched": details}}
-    else:
-        state_patch = {}
+    state_patch: dict = {}
 
     try:
         raw = await one_shot_json(
@@ -260,11 +308,47 @@ async def node_compose_reply(state: TaskState) -> dict:
     return {"reply_text": reply_text}
 
 
+async def node_rag(state: TaskState) -> dict:
+    """RAG-ветка для нетиповых тикетов.
+
+    Сейчас — заглушка: вызываем LLM без kb_id, модель отвечает по «здравому
+    инженерному смыслу». Когда поднимем векторный стор (Chroma/Qdrant) — здесь
+    же делаем поиск релевантных чанков и подмешиваем их в content. Если
+    указан config.ergpt_kb_id (встроенная KB ER-GPT) — передаём его в one_shot.
+    """
+    text = state.get("raw_text") or ""
+    try:
+        instruction = await one_shot(
+            content=text,
+            system_prompt=RAG_INSTRUCTION_SYSTEM,
+            temperature=0.2,
+            kb_id=config.ergpt_kb_id or None,
+        )
+    except ERGPTError as e:
+        log.exception("rag LLM failed")
+        instruction = (
+            "Не удалось автоматически подготовить инструкцию по этому обращению. "
+            "Передаю инженеру для ручной обработки."
+        )
+        return {
+            "instruction_text": instruction,
+            "reply_text": instruction,
+            "errors": [f"rag: {e}"],
+        }
+
+    # Текст инструкции уходит в комментарий тикета как есть (Markdown).
+    # Никаких xlsx/png-вложений для нетиповых не цепляем.
+    return {"instruction_text": instruction, "reply_text": instruction}
+
+
 async def node_reply(state: TaskState) -> dict:
+    cls = state.get("classification") or TicketClassification()
+    # для атипичных — только текст инструкции, без файловых артефактов
+    attachments = [] if cls.classification == "atypical" else (state.get("artifacts") or [])
     res = await reply_to_task.ainvoke({
         "task_id": state["task_id"],
         "text": state.get("reply_text") or "Заявка обработана.",
-        "attachments": state.get("artifacts") or [],
+        "attachments": attachments,
     })
     return {"reply_result": res}
 
@@ -274,32 +358,44 @@ async def node_reply(state: TaskState) -> dict:
 def build_graph():
     g = StateGraph(TaskState)
 
+    # классификация и общая точка выхода
+    g.add_node("classify", node_classify)
+    g.add_node("rag", node_rag)
+    g.add_node("reply", node_reply)
+
+    # типовая ветка (агентский путь)
     g.add_node("intake", node_intake)
     g.add_node("lookup", node_lookup)
     g.add_node("readings_flow", node_readings_flow)
     g.add_node("rejoin_flow", node_rejoin_flow)
     g.add_node("report", node_report)
     g.add_node("compose_reply", node_compose_reply)
-    g.add_node("reply", node_reply)
 
-    g.set_entry_point("intake")
+    g.set_entry_point("classify")
+
+    g.add_conditional_edges("classify", route_after_classify, {
+        "intake": "intake",   # typical
+        "rag": "rag",         # atypical
+    })
+
+    # типовая ветка
     g.add_edge("intake", "lookup")
-
     g.add_conditional_edges("lookup", route_after_lookup, {
         "readings_flow": "readings_flow",
         "rejoin_flow": "rejoin_flow",
         "report": "report",
     })
-
     g.add_edge("readings_flow", "report")
-
     g.add_conditional_edges("rejoin_flow", route_after_rejoin, {
         "readings_flow": "readings_flow",
         "report": "report",
     })
-
     g.add_edge("report", "compose_reply")
     g.add_edge("compose_reply", "reply")
+
+    # нетиповая ветка
+    g.add_edge("rag", "reply")
+
     g.add_edge("reply", END)
 
     return g.compile()

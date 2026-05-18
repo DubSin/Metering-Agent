@@ -1,0 +1,92 @@
+# ---------- Python ----------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# ---------- Виртуальные окружения ----------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---------- Секреты и конфиги окружения ----------
+# .env с ERGPT_API_KEY, HELPDESK_EDDY_API_KEY, METERING_PASS и т.п. в репу не кладём.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# ---------- Артефакты выполнения агента ----------
+# xlsx-отчёты, скриншоты — генерируются на каждый тикет.
+reports/
+*.xlsx
+*.xlsm
+*.png
+*.jpg
+*.jpeg
+# но картинки документации/README не игнорим:
+!docs/**/*.png
+!docs/**/*.jpg
+
+# ---------- Локальный state (дедуп тикетов, курсор полера) ----------
+state/
+*.cursor
+
+# ---------- Логи ----------
+logs/
+*.log
+
+# ---------- Тестовые/кэш-данные ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ---------- IDE / редакторы ----------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ---------- Windows ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---------- LangGraph / LangChain локальные артефакты ----------
+.langgraph/
+.langchain/
+
+# ---------- Playwright (скриншоты Metering UI) ----------
+.playwright/
+playwright-report/
+test-results/
+
+# ---------- Jupyter ----------
+.ipynb_checkpoints/
+*.ipynb
+
+# ---------- Локальные временные файлы ----------
+tmp/
+temp/
+*.bak
+*.tm

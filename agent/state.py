@@ -11,6 +11,13 @@ from pydantic import BaseModel
 
 Intent = Literal["readings", "rejoin", "both", "unknown"]
 ReadingsKind = Literal["daily", "last", "collection_map"]
+Classification = Literal["typical", "atypical", "unknown"]
+
+
+class TicketClassification(BaseModel):
+    classification: Classification = "unknown"
+    confidence: float = 0.0
+    reason: str = ""
 
 
 class MeterRef(BaseModel):
@@ -37,8 +44,14 @@ class TaskState(TypedDict, total=False):
     raw_text: str
     raw_payload: dict
 
-    # после intake
+    # после classify
+    classification: TicketClassification
+
+    # после intake (только для типовых)
     parsed: ParsedRequest
+
+    # после rag (только для нетиповых)
+    instruction_text: str
 
     # после lookup
     meters_resolved: list[MeterRef]

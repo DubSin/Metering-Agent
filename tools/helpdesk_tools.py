@@ -48,6 +48,33 @@ async def get_task_details(task_id: str) -> dict:
 
 
 @tool
+async def list_new_tickets(since: str | None = None, limit: int = 50) -> list[dict]:
+    """Получить список новых тикетов из HelpDeskEddy, открытых после `since` (ISO 8601).
+
+    Используется фоновым полером как страховка на случай пропущенных webhook'ов.
+    Возвращает массив объектов в формате того же `get_task_details`.
+
+    TODO(helpdesk_eddy_endpoint): уточнить точный путь и параметры в HelpDeskEddy.
+    Эндпоинт-плейсхолдер: GET /api/v1/tasks?status=open&since=...&limit=...
+    """
+    params: dict[str, str | int] = {"status": "open", "limit": limit}
+    if since:
+        params["since"] = since
+    try:
+        async with _client() as c:
+            r = await c.get("/api/v1/tasks", params=params)
+            r.raise_for_status()
+            data = r.json()
+            # HelpDeskEddy может вернуть либо список, либо обёртку {result: [...]}
+            if isinstance(data, dict):
+                return data.get("result") or data.get("tasks") or []
+            return data or []
+    except httpx.HTTPError as e:
+        log.exception("list_new_tickets failed")
+        return [{"error": str(e)}]
+
+
+@tool
 async def reply_to_task(
     task_id: str,
     text: str,

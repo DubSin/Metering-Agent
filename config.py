@@ -40,8 +40,22 @@ class AppConfig:
         "OPENAI_MODEL", "ERGPT-Main"
     )
     ergpt_timeout: float = float(os.getenv("ERGPT_TIMEOUT", "120"))
+    # ID базы знаний ER-GPT. Пока пусто — RAG-нода работает как заглушка
+    # (вызов LLM без kb_id). Когда KB будет настроена (Chroma/Qdrant + загрузка
+    # в портал ER-GPT) — заполните переменную и нода автоматически начнёт
+    # использовать RAG.
+    ergpt_kb_id: str = os.getenv("ERGPT_KB_ID", "")
+
     metering: MeteringServerConfig = field(default_factory=MeteringServerConfig)
     helpdesk_eddy: HelpDeskEddyConfig = field(default_factory=HelpDeskEddyConfig)
+
+    # Полер HelpDeskEddy (страховка на случай пропущенного webhook).
+    poll_interval_seconds: int = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
+    processed_tickets_path: str = os.getenv(
+        "PROCESSED_TICKETS_PATH", "./state/processed_tickets.txt"
+    )
+    poll_cursor_path: str = os.getenv("POLL_CURSOR_PATH", "./state/poll_cursor.txt")
+
     # Максимум ПУ в одной массовой операции (защита от перегрузки)
     max_bulk_size: int = int(os.getenv("MAX_BULK_SIZE", "50"))
     reports_dir: str = os.getenv("REPORTS_DIR", "./reports")

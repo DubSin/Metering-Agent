@@ -30,8 +30,12 @@ async def one_shot(
     system_prompt: str,
     temperature: float = 0.0,
     max_tokens: int | None = None,
+    kb_id: str | None = None,
 ) -> str:
-    """Одиночный запрос к ER-GPT. Возвращает текст ответа модели."""
+    """Одиночный запрос к ER-GPT. Возвращает текст ответа модели.
+
+    Если передан kb_id — включается RAG-поиск по базе знаний ER-GPT.
+    """
     if not config.ergpt_api_key:
         raise ERGPTError("ERGPT_API_KEY не задан в окружении")
 
@@ -43,6 +47,8 @@ async def one_shot(
     }
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if kb_id:
+        payload["kb_id"] = kb_id
 
     url = f"{config.ergpt_base_url.rstrip('/')}/api/v2/message/one-shot"
     headers = {

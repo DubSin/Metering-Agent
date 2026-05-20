@@ -212,6 +212,13 @@ async def node_rejoin_flow(state: TaskState) -> dict:
     await asyncio.sleep(min(config.metering.command_timeout, 30))
     status1 = await get_connection_status.ainvoke({"meter_ids": ids})
 
+    # Защищаемся от элементов без "meter_id" (например, при ошибке API
+    # get_connection_status возвращает [{"meter_id": m, "online": None, "error": ...}],
+    # но при будущей переделке эндпоинта структура может уехать).
+    def _valid(items: list[dict]) -> list[dict]:
+        return [s for s in items if isinstance(s, dict) and s.get("meter_id")]
+
+    status1 = _valid(status1)
     online_now = {s["meter_id"] for s in status1 if s.get("online")}
     offline = [m for m in ids if m not in online_now]
 
@@ -219,7 +226,7 @@ async def node_rejoin_flow(state: TaskState) -> dict:
     if offline and parsed.use_dead_reboot:
         dead = await send_dead_reboot.ainvoke({"meter_ids": offline})
         await asyncio.sleep(min(config.metering.command_timeout, 30))
-        status2 = await get_connection_status.ainvoke({"meter_ids": offline})
+        status2 = _valid(await get_connection_status.ainvoke({"meter_ids": offline}))
         # объединяем: для ПУ, что были offline, берём свежий статус
         merged = {s["meter_id"]: s for s in status1}
         for s in status2:

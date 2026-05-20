@@ -23,9 +23,28 @@ class MeteringServerConfig:
 
 @dataclass
 class HelpDeskEddyConfig:
-    # Единая система HelpDeskEddy: чтение задач и отправка ответов
-    base_url: str = os.getenv("HELPDESK_EDDY_BASE_URL", "https://support.lar.tech/ru")
+    """HelpDeskEddy API v2.
+
+    Аутентификация: Basic base64(email:api_key). API-ключ выдаётся главным
+    администратором и виден в профиле пользователя.
+
+    base_url — только хост, без /api/v2 (префикс добавляет клиент).
+    """
+    # host (без /api/v2). Пример: https://support.lar.tech
+    base_url: str = os.getenv("HELPDESK_EDDY_BASE_URL", "https://support.lar.tech")
+    email: str = os.getenv("HELPDESK_EDDY_EMAIL", "")
     api_key: str = os.getenv("HELPDESK_EDDY_API_KEY", "")
+    # Опц. секрет HMAC для проверки исходящих webhook'ов (если настроен в HDE).
+    webhook_secret: str = os.getenv("HELPDESK_EDDY_WEBHOOK_SECRET", "")
+    # Канал ответа: "comments" (видны только сотрудникам) или "posts" (видны клиенту).
+    # По решению по проекту: всегда внутренний комментарий.
+    reply_channel: str = os.getenv("HELPDESK_EDDY_REPLY_CHANNEL", "comments")
+    # Статус, в который переводим тикет после успешного ответа. Пусто = не менять.
+    post_reply_status: str = os.getenv("HELPDESK_EDDY_POST_REPLY_STATUS", "process")
+    # Фильтр поллера. По решению: только новые (open).
+    poll_status_list: str = os.getenv("HELPDESK_EDDY_POLL_STATUSES", "open")
+    # Лимит RPM на стороне HDE — 300/мин, блокировка 20 мин при превышении.
+    request_timeout: float = float(os.getenv("HELPDESK_EDDY_TIMEOUT", "30"))
 
 
 @dataclass

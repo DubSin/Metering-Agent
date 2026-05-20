@@ -7,12 +7,16 @@ FastAPI приёмник заявок HelpDeskEddy.
 Два канала поступления тикетов — оба идут через один и тот же граф:
 
   1. Webhook (push). HelpDeskEddy дёргает POST /helpdesk/webhook при создании
-     тикета. Реальное время, но может потеряться при сбоях сети/HD.
+     тикета (раздел «Исходящий канал» в админке). Реальное время.
+     Формат исходящего payload в API-доке не зафиксирован — поэтому здесь
+     принимаем произвольный JSON и достаём ID заявки из самых ожидаемых полей
+     (`ticket_id`, `id`, `data.ticket.id`, ...).
 
   2. Поллинг (pull). При старте приложения мы стартуем фоновую задачу, которая
      раз в `config.poll_interval_seconds` запрашивает у HelpDeskEddy свежие
-     тикеты (см. `list_new_tickets`). Курсор сохраняется в файле, дубли
-     отсекаются файловым дедупом (`agent/dedupe.py`).
+     тикеты со статусом `open` (см. `list_new_tickets`). Курсор сохраняется
+     в файле в формате `YYYY-MM-DD HH:MM:SS` (это `from_date_created` HDE).
+     Дубли отсекаются файловым дедупом (`agent/dedupe.py`).
 
 Защита от дублей обязательна: один и тот же тикет может прилететь по обоим
 каналам почти одновременно.
@@ -20,13 +24,14 @@ FastAPI приёмник заявок HelpDeskEddy.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
 from agent import run_task
 from agent.dedupe import acquire, seen
@@ -42,13 +47,6 @@ log = logging.getLogger("webhook")
 app = FastAPI(title="Metering TP Agent")
 
 
-class HelpDeskWebhook(BaseModel):
-    task_id: str
-    text: str | None = ""
-    author: str | None = None
-    attachments: list[Any] | None = None
-
-
 @app.get("/healthz")
 async def healthz() -> dict:
     return {"ok": True, "model": config.ergpt_model}
@@ -56,34 +54,83 @@ async def healthz() -> dict:
 
 # ---------- Webhook (push-канал) ----------
 
+def _extract_task_id(payload: Any) -> str | None:
+    """Достаём ID заявки из произвольной структуры HDE-вебхука.
+
+    Формат «Исходящего канала» в публичной доке не описан, поэтому пробуем
+    самые вероятные пути. При первом тестовом запуске стоит залогировать
+    реальный payload и при необходимости расширить список.
+    """
+    if not isinstance(payload, dict):
+        return None
+    for key in ("ticket_id", "task_id", "id"):
+        v = payload.get(key)
+        if v:
+            return str(v)
+    # вложенные варианты
+    ticket = payload.get("ticket")
+    if isinstance(ticket, dict):
+        v = ticket.get("id") or ticket.get("ticket_id")
+        if v:
+            return str(v)
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return _extract_task_id(data)
+    return None
+
+
+def _verify_signature(secret: str, body: bytes, signature: str | None) -> bool:
+    """HMAC-SHA256 от raw body, hex. Включается только если задан секрет."""
+    if not secret:
+        return True
+    if not signature:
+        return False
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    # допускаем префикс `sha256=` если HDE так шлёт
+    sig = signature.split("=", 1)[1] if "=" in signature else signature
+    return hmac.compare_digest(expected, sig.strip())
+
+
 @app.post("/helpdesk/webhook")
 async def helpdesk_webhook(
-    payload: HelpDeskWebhook,
+    request: Request,
     background: BackgroundTasks,
     x_helpdesk_signature: str | None = Header(default=None),
 ) -> dict:
-    # TODO(webhook_auth): проверить подпись/HMAC, если HelpDeskEddy её шлёт.
-    if not payload.task_id:
-        raise HTTPException(status_code=400, detail="task_id is required")
+    body = await request.body()
 
-    if not await acquire(payload.task_id):
-        log.info("webhook: dup task_id=%s — skip", payload.task_id)
-        return {"accepted": False, "duplicate": True, "task_id": payload.task_id}
+    if not _verify_signature(
+        config.helpdesk_eddy.webhook_secret, body, x_helpdesk_signature
+    ):
+        log.warning("webhook signature mismatch")
+        raise HTTPException(status_code=401, detail="invalid signature")
 
-    log.info("webhook accepted: task_id=%s", payload.task_id)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid json")
 
+    task_id = _extract_task_id(payload)
+    if not task_id:
+        log.warning("webhook payload without ticket id: %r", payload)
+        raise HTTPException(status_code=400, detail="ticket id not found in payload")
+
+    if not await acquire(task_id):
+        log.info("webhook: dup task_id=%s — skip", task_id)
+        return {"accepted": False, "duplicate": True, "task_id": task_id}
+
+    log.info("webhook accepted: task_id=%s", task_id)
+
+    # Текст заявки тянем уже в графе через get_task_details — webhook от HDE
+    # не гарантирует, что тело сообщения придёт в payload.
     async def _run() -> None:
         try:
-            await run_task(
-                task_id=payload.task_id,
-                raw_text=payload.text or "",
-                raw_payload=payload.model_dump(),
-            )
+            await run_task(task_id=task_id, raw_text="", raw_payload=payload)
         except Exception:
-            log.exception("task pipeline failed: %s", payload.task_id)
+            log.exception("task pipeline failed: %s", task_id)
 
     background.add_task(lambda: asyncio.create_task(_run()))
-    return {"accepted": True, "task_id": payload.task_id}
+    return {"accepted": True, "task_id": task_id}
 
 
 # ---------- Поллер (pull-канал) ----------
@@ -144,8 +191,9 @@ async def _poll_once() -> int:
     if newest_ts:
         _save_cursor(newest_ts)
     elif since is None:
-        # первый запуск без тикетов — сохраняем «сейчас», чтобы не тянуть всю историю
-        _save_cursor(datetime.now(timezone.utc).isoformat())
+        # первый запуск без тикетов — сохраняем «сейчас» в HDE-формате,
+        # чтобы не тянуть всю историю.
+        _save_cursor(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     if started:
         log.info("poll: started %d new task(s)", started)

@@ -90,3 +90,5 @@ tmp/
 temp/
 *.bak
 *.tm
+
+.claude/

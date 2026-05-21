@@ -109,6 +109,10 @@ async def get_task_details(task_id: str) -> dict:
                 return {"task_id": task_id, "status_code": r_posts.status_code, "error": err}
             r_posts.raise_for_status()
             posts = _unwrap(posts_json) or []
+            if isinstance(posts, dict):
+                # HDE отдаёт {post_id: {...}} — превратим в list, сортировку
+                # обеспечивает API параметром order_by.
+                posts = [v for v in posts.values() if isinstance(v, dict)]
             first = posts[0] if isinstance(posts, list) and posts else {}
 
             text = first.get("text") or first.get("message") or ""
@@ -164,9 +168,15 @@ async def list_new_tickets(since: str | None = None, limit: int = 50) -> list[di
                 return [{"error": err}]
             r.raise_for_status()
             items = _unwrap(data_json) or []
+            if isinstance(items, dict):
+                # HDE отдаёт data как {ticket_id: {...ticket}}, а не как list.
+                # Прочие варианты на всякий случай: {tickets:[...]} / {result:[...]}.
+                if "tickets" in items or "result" in items:
+                    items = items.get("tickets") or items.get("result") or []
+                else:
+                    items = [v for v in items.values() if isinstance(v, dict)]
             if not isinstance(items, list):
-                # на всякий случай: некоторые версии HDE могут вернуть {tickets: [...]}.
-                items = items.get("tickets") or items.get("result") or []
+                items = []
 
             out: list[dict] = []
             for it in items[:limit]:

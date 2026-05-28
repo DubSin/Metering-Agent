@@ -30,8 +30,7 @@ class HelpDeskEddyConfig:
 
     base_url — только хост, без /api/v2 (префикс добавляет клиент).
     """
-    # host (без /api/v2). Пример: https://support.lar.tech
-    base_url: str = os.getenv("HELPDESK_EDDY_BASE_URL", "https://support.lar.tech")
+    base_url: str = os.getenv("HELPDESK_EDDY_BASE_URL")
     email: str = os.getenv("HELPDESK_EDDY_EMAIL", "")
     api_key: str = os.getenv("HELPDESK_EDDY_API_KEY", "")
     # Опц. секрет HMAC для проверки исходящих webhook'ов (если настроен в HDE).
@@ -49,12 +48,11 @@ class HelpDeskEddyConfig:
 
 @dataclass
 class AppConfig:
-    # ER-GPT, нативный API v2 (one-shot). Внутренний контур: https://chatbot.lar.tech
     ergpt_api_key: str = field(
         default_factory=lambda: os.getenv("ERGPT_API_KEY")
         or os.getenv("OPENAI_API_KEY", "")
     )
-    ergpt_base_url: str = os.getenv("ERGPT_BASE_URL", "https://chatbot.lar.tech")
+    ergpt_base_url: str = os.getenv("ERGPT_BASE_URL")
     ergpt_model: str = os.getenv("ERGPT_MODEL") or os.getenv(
         "OPENAI_MODEL", "ERGPT-Main"
     )

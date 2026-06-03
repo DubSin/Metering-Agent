@@ -16,10 +16,11 @@ import logging
 from datetime import date
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
 from config import config
-from .ergpt_client import ERGPTError, one_shot, one_shot_json
 from tools import (
     build_readings_report,
     build_status_report,
@@ -34,82 +35,40 @@ from tools import (
     send_rejoin,
 )
 
-from .prompts import (
-    CLASSIFY_SYSTEM,
-    COMPOSE_REPLY_SYSTEM,
-    INTAKE_SYSTEM,
-    RAG_INSTRUCTION_SYSTEM,
-)
-from .state import MeterRef, ParsedRequest, TaskState, TicketClassification
+from .prompts import COMPOSE_REPLY_SYSTEM, INTAKE_SYSTEM
+from .state import MeterRef, ParsedRequest, TaskState
 
 log = logging.getLogger(__name__)
 
 
-# ---------- ноды ----------
-
-async def _ensure_text(state: TaskState) -> tuple[str, dict]:
-    """Гарантируем текст тикета: либо из payload, либо тянем из HelpDeskEddy."""
-    text = state.get("raw_text") or ""
-    if text or not state.get("task_id"):
-        return text, {}
-    details = await get_task_details.ainvoke({"task_id": state["task_id"]})
-    text = details.get("text") or details.get("subject") or ""
-    return text, {"raw_payload": {**(state.get("raw_payload") or {}), "fetched": details}}
-
-
-async def node_classify(state: TaskState) -> dict:
-    """LLM решает: типовая (агентский путь) или нетиповая (RAG)."""
-    text, state_patch = await _ensure_text(state)
-
-    if not text:
-        # пустой тикет — отправляем в нетиповые, инженер разберётся
-        cls = TicketClassification(
-            classification="atypical", confidence=1.0, reason="пустой текст тикета"
-        )
-        return {**state_patch, "classification": cls, "raw_text": text}
-
-    try:
-        raw = await one_shot_json(
-            content=text,
-            system_prompt=CLASSIFY_SYSTEM,
-            schema=TicketClassification.model_json_schema(),
-            temperature=0.0,
-        )
-        cls = TicketClassification.model_validate(raw)
-    except (ERGPTError, ValueError) as e:
-        log.exception("classify LLM failed")
-        # при сбое классификатора уводим в RAG: безопаснее отдать инструкцию,
-        # чем дёрнуть Реджойн по ошибочно понятому тикету
-        cls = TicketClassification(
-            classification="atypical", confidence=0.0, reason=f"classifier failed: {e}"
-        )
-
-    log.info(
-        "classify: %s (conf=%.2f) — %s",
-        cls.classification, cls.confidence, cls.reason,
+def _llm(temperature: float = 0.0) -> ChatOpenAI:
+    return ChatOpenAI(
+        model=config.openai_model,
+        temperature=temperature,
+        api_key=config.openai_api_key,
     )
-    return {**state_patch, "classification": cls, "raw_text": text}
 
 
-def route_after_classify(state: TaskState) -> str:
-    cls = state.get("classification") or TicketClassification()
-    return "intake" if cls.classification == "typical" else "rag"
-
+# ---------- ноды ----------
 
 async def node_intake(state: TaskState) -> dict:
     """Разбираем текст заявки в ParsedRequest через LLM (structured output)."""
     text = state.get("raw_text") or ""
-    state_patch: dict = {}
+    if not text and state.get("task_id"):
+        # текст не пришёл с webhook — дотягиваем из HelpDesk
+        details = await get_task_details.ainvoke({"task_id": state["task_id"]})
+        text = details.get("text") or details.get("subject") or ""
+        state_patch: dict = {"raw_payload": {**(state.get("raw_payload") or {}), "fetched": details}}
+    else:
+        state_patch = {}
 
+    llm = _llm().with_structured_output(ParsedRequest)
     try:
-        raw = await one_shot_json(
-            content=text,
-            system_prompt=INTAKE_SYSTEM,
-            schema=ParsedRequest.model_json_schema(),
-            temperature=0.0,
-        )
-        parsed = ParsedRequest.model_validate(raw)
-    except (ERGPTError, ValueError) as e:
+        parsed: ParsedRequest = await llm.ainvoke([
+            SystemMessage(content=INTAKE_SYSTEM),
+            HumanMessage(content=text),
+        ])
+    except Exception as e:
         log.exception("intake LLM failed")
         return {**state_patch, "parsed": ParsedRequest(), "errors": [f"intake: {e}"]}
 
@@ -212,13 +171,6 @@ async def node_rejoin_flow(state: TaskState) -> dict:
     await asyncio.sleep(min(config.metering.command_timeout, 30))
     status1 = await get_connection_status.ainvoke({"meter_ids": ids})
 
-    # Защищаемся от элементов без "meter_id" (например, при ошибке API
-    # get_connection_status возвращает [{"meter_id": m, "online": None, "error": ...}],
-    # но при будущей переделке эндпоинта структура может уехать).
-    def _valid(items: list[dict]) -> list[dict]:
-        return [s for s in items if isinstance(s, dict) and s.get("meter_id")]
-
-    status1 = _valid(status1)
     online_now = {s["meter_id"] for s in status1 if s.get("online")}
     offline = [m for m in ids if m not in online_now]
 
@@ -226,7 +178,7 @@ async def node_rejoin_flow(state: TaskState) -> dict:
     if offline and parsed.use_dead_reboot:
         dead = await send_dead_reboot.ainvoke({"meter_ids": offline})
         await asyncio.sleep(min(config.metering.command_timeout, 30))
-        status2 = _valid(await get_connection_status.ainvoke({"meter_ids": offline}))
+        status2 = await get_connection_status.ainvoke({"meter_ids": offline})
         # объединяем: для ПУ, что были offline, берём свежий статус
         merged = {s["meter_id"]: s for s in status1}
         for s in status2:
@@ -303,59 +255,18 @@ async def node_compose_reply(state: TaskState) -> dict:
         "artifacts_count": len(state.get("artifacts", [])),
         "errors": state.get("errors", []),
     }
-    try:
-        reply_text = await one_shot(
-            content=json.dumps(summary, ensure_ascii=False, default=str),
-            system_prompt=COMPOSE_REPLY_SYSTEM,
-            temperature=0.2,
-        )
-    except ERGPTError as e:
-        log.exception("compose_reply LLM failed")
-        return {"reply_text": "Заявка обработана.", "errors": [f"compose_reply: {e}"]}
-    return {"reply_text": reply_text}
-
-
-async def node_rag(state: TaskState) -> dict:
-    """RAG-ветка для нетиповых тикетов.
-
-    Сейчас — заглушка: вызываем LLM без kb_id, модель отвечает по «здравому
-    инженерному смыслу». Когда поднимем векторный стор (Chroma/Qdrant) — здесь
-    же делаем поиск релевантных чанков и подмешиваем их в content. Если
-    указан config.ergpt_kb_id (встроенная KB ER-GPT) — передаём его в one_shot.
-    """
-    text = state.get("raw_text") or ""
-    try:
-        instruction = await one_shot(
-            content=text,
-            system_prompt=RAG_INSTRUCTION_SYSTEM,
-            temperature=0.2,
-            kb_id=config.ergpt_kb_id or None,
-        )
-    except ERGPTError as e:
-        log.exception("rag LLM failed")
-        instruction = (
-            "Не удалось автоматически подготовить инструкцию по этому обращению. "
-            "Передаю инженеру для ручной обработки."
-        )
-        return {
-            "instruction_text": instruction,
-            "reply_text": instruction,
-            "errors": [f"rag: {e}"],
-        }
-
-    # Текст инструкции уходит в комментарий тикета как есть (Markdown).
-    # Никаких xlsx/png-вложений для нетиповых не цепляем.
-    return {"instruction_text": instruction, "reply_text": instruction}
+    msg = await _llm(temperature=0.2).ainvoke([
+        SystemMessage(content=COMPOSE_REPLY_SYSTEM),
+        HumanMessage(content=json.dumps(summary, ensure_ascii=False, default=str)),
+    ])
+    return {"reply_text": msg.content}
 
 
 async def node_reply(state: TaskState) -> dict:
-    cls = state.get("classification") or TicketClassification()
-    # для атипичных — только текст инструкции, без файловых артефактов
-    attachments = [] if cls.classification == "atypical" else (state.get("artifacts") or [])
     res = await reply_to_task.ainvoke({
         "task_id": state["task_id"],
         "text": state.get("reply_text") or "Заявка обработана.",
-        "attachments": attachments,
+        "attachments": state.get("artifacts") or [],
     })
     return {"reply_result": res}
 
@@ -365,44 +276,32 @@ async def node_reply(state: TaskState) -> dict:
 def build_graph():
     g = StateGraph(TaskState)
 
-    # классификация и общая точка выхода
-    g.add_node("classify", node_classify)
-    g.add_node("rag", node_rag)
-    g.add_node("reply", node_reply)
-
-    # типовая ветка (агентский путь)
     g.add_node("intake", node_intake)
     g.add_node("lookup", node_lookup)
     g.add_node("readings_flow", node_readings_flow)
     g.add_node("rejoin_flow", node_rejoin_flow)
     g.add_node("report", node_report)
     g.add_node("compose_reply", node_compose_reply)
+    g.add_node("reply", node_reply)
 
-    g.set_entry_point("classify")
-
-    g.add_conditional_edges("classify", route_after_classify, {
-        "intake": "intake",   # typical
-        "rag": "rag",         # atypical
-    })
-
-    # типовая ветка
+    g.set_entry_point("intake")
     g.add_edge("intake", "lookup")
+
     g.add_conditional_edges("lookup", route_after_lookup, {
         "readings_flow": "readings_flow",
         "rejoin_flow": "rejoin_flow",
         "report": "report",
     })
+
     g.add_edge("readings_flow", "report")
+
     g.add_conditional_edges("rejoin_flow", route_after_rejoin, {
         "readings_flow": "readings_flow",
         "report": "report",
     })
+
     g.add_edge("report", "compose_reply")
     g.add_edge("compose_reply", "reply")
-
-    # нетиповая ветка
-    g.add_edge("rag", "reply")
-
     g.add_edge("reply", END)
 
     return g.compile()

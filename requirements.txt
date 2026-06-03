@@ -9,3 +9,9 @@ uvicorn[standard]>=0.30
 openpyxl>=3.1
 playwright>=1.45
 python-dotenv>=1.0
+# RAG по базе знаний (DeepSeek + Qdrant)
+qdrant-client>=1.9
+fastembed>=0.3
+beautifulsoup4>=4.12
+# Тесты
+pytest>=8.0

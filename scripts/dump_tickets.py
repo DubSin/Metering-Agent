@@ -43,8 +43,8 @@ try:
 except ImportError:
     pass
 
-# Переиспользуем GET-only клиент и парсеры из process_tickets (без RAG-логики).
-from scripts.process_tickets import (  # noqa: E402
+# Переиспользуем GET-only клиент и парсеры из общего модуля (без RAG-логики).
+from tools.helpdesk_tools import (  # noqa: E402
     api_base,
     fetch_tickets,
     make_client,

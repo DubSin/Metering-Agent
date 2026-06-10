@@ -23,11 +23,35 @@ class MeteringServerConfig:
 
 @dataclass
 class HelpDeskEddyConfig:
-    # Единая система HelpDeskEddy: чтение задач и отправка ответов
+    # Единая система HelpDeskEddy: чтение задач (только GET в пайплайне)
     base_url: str = os.getenv("HELPDESK_EDDY_BASE_URL", "https://support.lar.tech/ru")
     api_key: str = os.getenv("HELPDESK_EDDY_API_KEY", "")
     # Email учётки оператора — нужен для Basic-аутентификации API v2 (email:api_key)
     email: str = os.getenv("HELPDESK_EDDY_EMAIL", "")
+    # Шаблон ссылки на тикет для сообщения оператору. {id} подставляется.
+    ticket_url_template: str = os.getenv(
+        "HELPDESK_TICKET_URL_TEMPLATE",
+        "https://support.lar.tech/ru/ticket/list/filter/id/1/ticket/{id}",
+    )
+
+
+@dataclass
+class TelegramConfig:
+    # Бот для human-in-the-loop ревью тикетов
+    bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    # Групповой чат, куда идёт рассылка тикетов на ревью
+    chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    api_base: str = os.getenv("TELEGRAM_API_BASE", "https://api.telegram.org")
+    # Таймаут long-polling getUpdates (секунды)
+    poll_timeout: int = int(os.getenv("TELEGRAM_POLL_TIMEOUT", "30"))
+    # Белый список пользователей, которым разрешено управлять ботом
+    # (кнопки и команды). Через запятую/пробел: numeric user_id и/или @username.
+    # ПУСТО = разрешено всем (открытый режим).
+    allowed_users: tuple[str, ...] = tuple(
+        e.strip().lstrip("@").lower()
+        for e in os.getenv("TELEGRAM_ALLOWED_USERS", "").replace(",", " ").split()
+        if e.strip()
+    )
 
 
 @dataclass
@@ -76,6 +100,7 @@ class AppConfig:
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o")
     metering: MeteringServerConfig = field(default_factory=MeteringServerConfig)
     helpdesk_eddy: HelpDeskEddyConfig = field(default_factory=HelpDeskEddyConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
     deepseek: DeepSeekConfig = field(default_factory=DeepSeekConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     # Провайдер LLM для генерации в RAG: "deepseek" | "ollama"
@@ -84,6 +109,11 @@ class AppConfig:
     # Максимум ПУ в одной массовой операции (защита от перегрузки)
     max_bulk_size: int = int(os.getenv("MAX_BULK_SIZE", "50"))
     reports_dir: str = os.getenv("REPORTS_DIR", "./reports")
+    # SQLite с решениями операторов (датасет для дообучения)
+    feedback_db: str = os.getenv("FEEDBACK_DB", "./data/feedback.sqlite3")
+    # Ручная подтяжка тикетов из бота (команда /fetch)
+    fetch_statuses: str = os.getenv("FETCH_STATUSES", "open")     # status_list по умолчанию
+    fetch_limit: int = int(os.getenv("FETCH_LIMIT", "20"))        # сколько тикетов за раз
 
 
 config = AppConfig()

@@ -25,9 +25,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
-
-import httpx
 
 # Позволяет запускать как `python scripts/process_tickets.py`, так и `-m scripts.process_tickets`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -49,141 +46,13 @@ except ImportError:  # python-dotenv не обязателен
 
 from config import config  # noqa: E402
 from rag.pipeline import RagPipeline  # noqa: E402
-
-
-# --------------------------------------------------------------------------- #
-# HelpDeskEddy API v2 клиент
-# --------------------------------------------------------------------------- #
-def api_base() -> str:
-    """Сформировать базу API v2 из HELPDESK_EDDY_BASE_URL (только схема и хост)."""
-    parts = urlsplit(config.helpdesk_eddy.base_url)
-    if not parts.scheme or not parts.netloc:
-        raise SystemExit(
-            "HELPDESK_EDDY_BASE_URL задан некорректно: "
-            f"{config.helpdesk_eddy.base_url!r}"
-        )
-    return f"{parts.scheme}://{parts.netloc}/api/v2"
-
-
-def make_client() -> httpx.Client:
-    email = config.helpdesk_eddy.email
-    api_key = config.helpdesk_eddy.api_key
-    if not email or not api_key:
-        raise SystemExit(
-            "Нужны HELPDESK_EDDY_EMAIL и HELPDESK_EDDY_API_KEY "
-            "(Basic-аутентификация API v2). Заполни их в .env."
-        )
-    return httpx.Client(
-        base_url=api_base(),
-        auth=(email, api_key),  # Basic email:api_key
-        headers={"Accept": "application/json"},
-        timeout=60,
-        follow_redirects=True,
-    )
-
-
-def paginate(
-    client: httpx.Client,
-    path: str,
-    params: dict,
-    limit: int | None = None,
-) -> list[dict]:
-    """Собрать объекты со всех страниц. data приходит словарём {id: obj} или списком."""
-    items: list[dict] = []
-    page = 1
-    while True:
-        resp = client.get(path, params={**params, "page": page})
-        resp.raise_for_status()
-        payload = resp.json()
-        data = payload.get("data") or {}
-        if isinstance(data, dict):
-            items.extend(data.values())
-        elif isinstance(data, list):
-            items.extend(data)
-
-        if limit and len(items) >= limit:
-            return items[:limit]
-
-        pg = payload.get("pagination") or {}
-        total_pages = pg.get("total_pages")
-        current = pg.get("current_page", page)
-        if not total_pages or current >= total_pages:
-            break
-        page = current + 1
-    return items
-
-
-# --------------------------------------------------------------------------- #
-# Извлечение текста тикета
-# --------------------------------------------------------------------------- #
-def _strip_html(html: str) -> str:
-    """Убрать разметку из тела поста (тот же подход, что в rag.kb_loader)."""
-    if not html:
-        return ""
-    try:
-        from bs4 import BeautifulSoup
-    except ImportError:
-        # грубый фолбэк без bs4
-        import re
-
-        text = re.sub(r"<[^>]+>", " ", html)
-        return re.sub(r"\s+", " ", text).strip()
-
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style"]):
-        tag.decompose()
-    lines = [ln.strip() for ln in soup.get_text("\n").splitlines()]
-    return "\n".join(ln for ln in lines if ln)
-
-
-def _pick(d: dict, *keys: str) -> str:
-    """Первое непустое строковое значение по списку возможных ключей."""
-    for k in keys:
-        v = d.get(k)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    return ""
-
-
-def ticket_subject(ticket: dict) -> str:
-    return _pick(ticket, "subject", "title", "name")
-
-
-def ticket_body(client: httpx.Client, ticket_id: str | int) -> str:
-    """Тело обращения = первый пост тикета (GET /tickets/{id}/posts/)."""
-    try:
-        posts = paginate(client, f"/tickets/{ticket_id}/posts/", {})
-    except httpx.HTTPError as e:
-        print(f"  ! не удалось прочитать посты тикета {ticket_id}: {e}", file=sys.stderr)
-        return ""
-    if not posts:
-        return ""
-    # первый по времени пост — исходное обращение клиента
-    posts.sort(key=lambda p: p.get("date_created") or p.get("id") or 0)
-    first = posts[0]
-    return _strip_html(_pick(first, "message", "text", "body", "content"))
-
-
-def ticket_text(client: httpx.Client, ticket: dict) -> str:
-    """Склеить тему и тело обращения в один текст для RAG."""
-    subject = ticket_subject(ticket)
-    body = ticket_body(client, ticket["id"])
-    parts = [p for p in (subject, body) if p]
-    return "\n\n".join(parts).strip()
-
-
-def fetch_tickets(
-    client: httpx.Client,
-    statuses: str | None,
-    from_date: str | None,
-    limit: int | None,
-) -> list[dict]:
-    params: dict = {}
-    if statuses:
-        params["status_list"] = statuses
-    if from_date:
-        params["from_date_created"] = from_date
-    return paginate(client, "/tickets/", params, limit=limit)
+from tools.helpdesk_tools import (  # noqa: E402
+    api_base,
+    fetch_tickets,
+    make_client,
+    ticket_subject,
+    ticket_text,
+)
 
 
 # --------------------------------------------------------------------------- #

@@ -9,6 +9,8 @@ uvicorn[standard]>=0.30
 openpyxl>=3.1
 playwright>=1.45
 python-dotenv>=1.0
+# Telegram-бот ревью тикетов использует httpx (выше) и sqlite3 из stdlib —
+# дополнительных зависимостей не требует.
 # RAG по базе знаний (DeepSeek + Qdrant)
 qdrant-client>=1.9
 fastembed>=0.3

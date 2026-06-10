@@ -1,15 +1,22 @@
 """
-FastAPI webhook-приёмник от HelpDesk.
+FastAPI webhook-приёмник от HelpDesk (push-режим приёма тикетов).
 
 Запуск:
     uvicorn webhook:app --host 0.0.0.0 --port 8080
 
+Поток (см. processing.process_ticket): текст тикета (payload или GET v2) →
+RAG-инструкция → рассылка в Telegram-группу с кнопками Approve/Decline/Your answer.
+К HelpDesk идут только GET-запросы; ответ клиенту пишет оператор после ревью.
+
+Вручную тикеты можно подтянуть из бота командой /fetch (без проброса в сеть).
+
 Ожидаемый формат payload (адаптируй под свою HelpDesk при подключении):
     {
       "task_id": "12345",
-      "text": "Текст обращения",
+      "text": "Текст обращения",   # опционально — если нет, дотянем GET'ом
+      "subject": "...",            # опционально
       "author": "...",
-      "attachments": [...]   # опционально
+      "attachments": [...]          # опционально
     }
 """
 from __future__ import annotations
@@ -21,8 +28,8 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from agent import run_task
 from config import config
+from processing import process_ticket
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +43,7 @@ app = FastAPI(title="Metering TP Agent")
 class HelpDeskWebhook(BaseModel):
     task_id: str
     text: str | None = ""
+    subject: str | None = None
     author: str | None = None
     attachments: list[Any] | None = None
 
@@ -59,13 +67,14 @@ async def helpdesk_webhook(
 
     async def _run() -> None:
         try:
-            await run_task(
-                task_id=payload.task_id,
-                raw_text=payload.text or "",
-                raw_payload=payload.model_dump(),
+            await asyncio.to_thread(
+                process_ticket,
+                payload.task_id,
+                payload.text or "",
+                payload.subject,
             )
         except Exception:
-            log.exception("task pipeline failed: %s", payload.task_id)
+            log.exception("ticket processing failed: %s", payload.task_id)
 
-    background.add_task(lambda: asyncio.create_task(_run()))
+    background.add_task(_run)
     return {"accepted": True, "task_id": payload.task_id}

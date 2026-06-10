@@ -2,11 +2,14 @@
 LangGraph state-machine для обработки заявок ТП.
 
 Поток:
-  intake → lookup → router → [readings_flow | rejoin_flow | both] → report → reply → END
+  intake → lookup → router → [readings_flow | rejoin_flow | both] → report → compose_reply → END
+
+Граф НЕ пишет в HelpDesk: финальный текст складывается в state.reply_text, а
+отправку клиенту делает оператор после ревью в Telegram. К HelpDesk идут только
+GET-запросы (в node_intake, чтобы дотянуть текст заявки).
 
 LLM используется только в двух местах: intake (разбор текста заявки) и
-compose_reply (формирование ответа клиенту). Все обращения к Metering Server /
-HelpDesk — детерминированные tool-вызовы.
+compose_reply (формирование ответа клиенту).
 """
 from __future__ import annotations
 
@@ -28,7 +31,6 @@ from tools import (
     get_connection_status,
     get_task_details,
     parse_non_spodes_readings,
-    reply_to_task,
     request_readings,
     search_meters,
     send_dead_reboot,
@@ -262,15 +264,6 @@ async def node_compose_reply(state: TaskState) -> dict:
     return {"reply_text": msg.content}
 
 
-async def node_reply(state: TaskState) -> dict:
-    res = await reply_to_task.ainvoke({
-        "task_id": state["task_id"],
-        "text": state.get("reply_text") or "Заявка обработана.",
-        "attachments": state.get("artifacts") or [],
-    })
-    return {"reply_result": res}
-
-
 # ---------- сборка графа ----------
 
 def build_graph():
@@ -282,7 +275,6 @@ def build_graph():
     g.add_node("rejoin_flow", node_rejoin_flow)
     g.add_node("report", node_report)
     g.add_node("compose_reply", node_compose_reply)
-    g.add_node("reply", node_reply)
 
     g.set_entry_point("intake")
     g.add_edge("intake", "lookup")
@@ -301,8 +293,7 @@ def build_graph():
     })
 
     g.add_edge("report", "compose_reply")
-    g.add_edge("compose_reply", "reply")
-    g.add_edge("reply", END)
+    g.add_edge("compose_reply", END)
 
     return g.compile()
 

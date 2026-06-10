@@ -139,6 +139,8 @@ def make_llm(provider: str | None = None) -> DeepSeekClient:
             timeout=config.ollama.timeout,
         )
         client._default_temperature = config.ollama.temperature
+        # Ollama не понимает reasoning_effort — не отправляем это поле.
+        client.reasoning_effort = ""
         return client
     if provider == "deepseek":
         return DeepSeekClient(

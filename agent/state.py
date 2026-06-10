@@ -53,9 +53,8 @@ class TaskState(TypedDict, total=False):
     # артефакты для клиента
     artifacts: list[str]            # пути к xlsx/png
 
-    # ответ клиенту
+    # предложенный текст ответа (граф НЕ отправляет его в HelpDesk)
     reply_text: str
-    reply_result: dict
 
     # ошибки нодов (накапливаем, не падаем)
     errors: Annotated[list[str], "append"]

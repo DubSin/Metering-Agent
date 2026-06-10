@@ -23,3 +23,11 @@ Thumbs.db
 .venv/
 /ticket_samples/
 /models/
+
+# Датасет решений операторов (SQLite) и экспорт
+/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+/dataset.jsonl
+/declines.jsonl

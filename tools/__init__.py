@@ -11,7 +11,7 @@ from .report_tools import (
     build_status_report,
     capture_metering_screenshot,
 )
-from .helpdesk_tools import get_task_details, reply_to_task
+from .helpdesk_tools import get_task_details, get_ticket_text
 
 __all__ = [
     "search_meters",
@@ -24,5 +24,5 @@ __all__ = [
     "build_status_report",
     "capture_metering_screenshot",
     "get_task_details",
-    "reply_to_task",
+    "get_ticket_text",
 ]

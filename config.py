@@ -33,12 +33,25 @@ class HelpDeskEddyConfig:
 @dataclass
 class DeepSeekConfig:
     # OpenAI-совместимый сервер DeepSeek (подключение по доменному имени и порту)
-    base_url: str = os.getenv("DEEPSEEK_BASE_URL", "http://chatbot.lar.tech:8081/v1")
+    base_url: str = os.getenv("DEEPSEEK_BASE_URL", "http://chatbot.lar.tech:8080/v1")
     api_key: str = os.getenv("DEEPSEEK_API_KEY", "")  # сервер может не требовать ключа
     # Имя модели. Пусто → берём первую из GET /v1/models.
-    model: str = os.getenv("DEEPSEEK_MODEL", "")
+    model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.2"))
     timeout: int = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
+    # "minimal" — быстрый ответ без цепочки рассуждений. Пусто — не передаём.
+    reasoning_effort: str = os.getenv("DEEPSEEK_REASONING_EFFORT", "minimal")
+
+
+@dataclass
+class OllamaConfig:
+    # OpenAI-совместимый эндпоинт Ollama (POST /v1/chat/completions).
+    base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    api_key: str = os.getenv("OLLAMA_API_KEY", "ollama")  # Ollama ключ не проверяет
+    # Имя модели. Пусто → берём первую из GET /v1/models.
+    model: str = os.getenv("OLLAMA_MODEL", "")
+    temperature: float = float(os.getenv("OLLAMA_TEMPERATURE", "0.2"))
+    timeout: int = int(os.getenv("OLLAMA_TIMEOUT", "120"))
 
 
 @dataclass
@@ -64,6 +77,9 @@ class AppConfig:
     metering: MeteringServerConfig = field(default_factory=MeteringServerConfig)
     helpdesk_eddy: HelpDeskEddyConfig = field(default_factory=HelpDeskEddyConfig)
     deepseek: DeepSeekConfig = field(default_factory=DeepSeekConfig)
+    ollama: OllamaConfig = field(default_factory=OllamaConfig)
+    # Провайдер LLM для генерации в RAG: "deepseek" | "ollama"
+    llm_provider: str = os.getenv("LLM_PROVIDER", "deepseek")
     rag: RagConfig = field(default_factory=RagConfig)
     # Максимум ПУ в одной массовой операции (защита от перегрузки)
     max_bulk_size: int = int(os.getenv("MAX_BULK_SIZE", "50"))

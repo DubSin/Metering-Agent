@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from .llm import DeepSeekClient
+from .llm import DeepSeekClient, make_llm
 from .prompts import NO_CONTEXT, RAG_SYSTEM, USER_TEMPLATE
 from .vector_store import VectorStore
 
@@ -32,7 +32,7 @@ class RagPipeline:
         llm: DeepSeekClient | None = None,
     ) -> None:
         self.store = store or VectorStore()
-        self.llm = llm or DeepSeekClient()
+        self.llm = llm or make_llm()
 
     @staticmethod
     def _format_context(hits: list[dict]) -> str:

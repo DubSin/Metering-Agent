@@ -21,3 +21,5 @@ Thumbs.db
 .idea/
 *.swp
 .venv/
+/ticket_samples/
+/models/

@@ -23,16 +23,23 @@ class TelegramError(RuntimeError):
 
 
 class BotClient:
-    def __init__(self, token: str | None = None, api_base: str | None = None) -> None:
+    def __init__(
+        self,
+        token: str | None = None,
+        api_base: str | None = None,
+        proxy: str | None = None,
+    ) -> None:
         self.token = token or config.telegram.bot_token
         if not self.token:
             raise ValueError("Не задан TELEGRAM_BOT_TOKEN")
         base = (api_base or config.telegram.api_base).rstrip("/")
         self._base_url = f"{base}/bot{self.token}"
+        # Прокси только для ТГ; пусто → прямое соединение.
+        self._proxy = (proxy if proxy is not None else config.telegram.proxy) or None
 
     def _call(self, method: str, payload: dict, timeout: float = 30.0) -> dict:
         url = f"{self._base_url}/{method}"
-        resp = httpx.post(url, json=payload, timeout=timeout)
+        resp = httpx.post(url, json=payload, timeout=timeout, proxy=self._proxy)
         # Telegram кладёт причину в тело ({"ok":false,"description":...}) —
         # читаем его и при ошибке, иначе raise_for_status его теряет.
         try:

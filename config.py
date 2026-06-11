@@ -42,6 +42,10 @@ class TelegramConfig:
     # Групповой чат, куда идёт рассылка тикетов на ревью
     chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     api_base: str = os.getenv("TELEGRAM_API_BASE", "https://api.telegram.org")
+    # Прокси ТОЛЬКО для запросов к Telegram (http://… или socks5://…).
+    # Нужен, когда api.telegram.org заблокирован у провайдера/хостинга.
+    # Пусто = без прокси. Не влияет на HelpDesk/DeepSeek/Ollama.
+    proxy: str = os.getenv("TELEGRAM_PROXY", "")
     # Таймаут long-polling getUpdates (секунды)
     poll_timeout: int = int(os.getenv("TELEGRAM_POLL_TIMEOUT", "30"))
     # Белый список пользователей, которым разрешено управлять ботом

@@ -2,7 +2,7 @@
 FastAPI webhook-приёмник от HelpDesk (push-режим приёма тикетов).
 
 Запуск:
-    uvicorn webhook:app --host 0.0.0.0 --port 8080
+    uvicorn webhook:app --host 0.0.0.0 --port 8181
 
 Поток (см. processing.process_ticket): текст тикета (payload или GET v2) →
 RAG-инструкция → рассылка в Telegram-группу с кнопками Approve/Decline/Your answer.
@@ -72,6 +72,7 @@ async def helpdesk_webhook(
                 payload.task_id,
                 payload.text or "",
                 payload.subject,
+                skip_existing=True,
             )
         except Exception:
             log.exception("ticket processing failed: %s", payload.task_id)

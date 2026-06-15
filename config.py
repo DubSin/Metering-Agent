@@ -115,9 +115,11 @@ class AppConfig:
     reports_dir: str = os.getenv("REPORTS_DIR", "./reports")
     # SQLite с решениями операторов (датасет для дообучения)
     feedback_db: str = os.getenv("FEEDBACK_DB", "./data/feedback.sqlite3")
-    # Ручная подтяжка тикетов из бота (команда /fetch)
+    # Ручная подтяжка тикетов из бота (команда /fetch) и автоопрос поллером
     fetch_statuses: str = os.getenv("FETCH_STATUSES", "open")     # status_list по умолчанию
     fetch_limit: int = int(os.getenv("FETCH_LIMIT", "20"))        # сколько тикетов за раз
+    # Интервал автоопроса HelpDesk поллером (секунды). По умолчанию 20 минут.
+    poll_interval: int = int(os.getenv("POLL_INTERVAL", "1200"))
 
 
 config = AppConfig()

@@ -4,16 +4,16 @@
 
 Поднимает в одном процессе:
   • Telegram-бот ревью (long-polling) — в фоновом потоке;
-  • webhook-приёмник HelpDesk (uvicorn) — в главном потоке.
+  • поллер HelpDesk — каждые POLL_INTERVAL секунд сам тянет новые тикеты
+    (только GET) и шлёт их на ревью в Telegram (главный поток).
 
-RAG-пайплайн (эмбеддинги/Qdrant) при этом инициализируется один раз и общий
+RAG-пайплайн (эмбеддинги/Qdrant) инициализируется один раз при старте и общий
 для обоих (singleton в processing.py).
 
 Запуск:
-    python run.py                       # бот + webhook на 0.0.0.0:8080
-    python run.py --port 9000           # другой порт
-    python run.py --no-webhook          # только бот (например, для /fetch без проброса)
-    python run.py --no-bot              # только webhook
+    python run.py                  # бот + поллер
+    python run.py --no-poller      # только бот (ревью вручную через /fetch)
+    python run.py --no-bot         # только поллер
 
 Ctrl+C — корректно завершает оба.
 """
@@ -52,15 +52,24 @@ def _start_bot() -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--host", default="0.0.0.0")
-    ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--no-bot", action="store_true", help="не запускать Telegram-бота")
-    ap.add_argument("--no-webhook", action="store_true", help="не запускать webhook")
+    ap.add_argument("--no-poller", action="store_true", help="не запускать поллер HelpDesk")
     args = ap.parse_args()
 
-    if args.no_bot and args.no_webhook:
-        log.error("Нечего запускать: указаны и --no-bot, и --no-webhook")
+    if args.no_bot and args.no_poller:
+        log.error("Нечего запускать: указаны и --no-bot, и --no-poller")
         return 1
+
+    # Прогреваем RAG-пайплайн один раз до старта потоков: грузим эмбеддер/Qdrant
+    # заранее (быстрый первый ответ) и избегаем гонки за ленивую инициализацию
+    # между поллером и ботом.
+    try:
+        from processing import get_pipeline
+
+        log.info("Инициализирую RAG-пайплайн (эмбеддинги/Qdrant)…")
+        get_pipeline()
+    except Exception:
+        log.exception("Не удалось прогреть RAG-пайплайн (продолжаю, поднимется лениво)")
 
     bot_thread: threading.Thread | None = None
     if not args.no_bot:
@@ -68,11 +77,15 @@ def main() -> int:
         bot_thread = threading.Thread(target=_start_bot, name="tgbot", daemon=True)
         bot_thread.start()
 
-    if not args.no_webhook:
-        import uvicorn
+    if not args.no_poller:
+        from poller import run as run_poller
 
-        log.info("Запускаю webhook на %s:%s …", args.host, args.port)
-        uvicorn.run("webhook:app", host=args.host, port=args.port, log_level="info")
+        stop = threading.Event()
+        try:
+            run_poller(stop)  # блокирует главный поток
+        except KeyboardInterrupt:
+            log.info("Остановлено пользователем")
+            stop.set()
     elif bot_thread is not None:
         # только бот: держим главный поток живым
         try:

@@ -6,6 +6,18 @@
 import os
 from dataclasses import dataclass, field
 
+# .env грузим ЗДЕСЬ — до чтения переменных в телах @dataclass ниже. config
+# импортируется раньше всего (в т.ч. транзитивно из rag/__init__.py), поэтому
+# load_dotenv() в отдельных entrypoint'ах (run.py, rag.index) для standalone
+# запусков `python -m rag.* / poller` срабатывает слишком поздно — значения
+# уже «заморожены» на дефолтах. Загрузка здесь чинит это для всех входов.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 
 @dataclass
 class MeteringServerConfig:

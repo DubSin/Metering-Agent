@@ -1,4 +1,6 @@
 """Тесты RAG-пайплайна на заглушках (без Qdrant/fastembed/сети)."""
+import json
+
 import pytest
 
 from rag.pipeline import RagPipeline
@@ -84,7 +86,53 @@ def test_answer_no_hits_skips_llm():
 
     assert ans.instruction == NO_CONTEXT
     assert ans.sources == []
+    assert ans.solution_found is False
+    assert ans.unknown_terms == []
     assert llm.messages is None  # LLM не вызывался
+
+
+def test_answer_parses_json_solution_and_terms():
+    store = FakeStore(HITS)
+    payload = json.dumps(
+        {
+            "solution_found": True,
+            "instruction": "1. Суть\n2. Шаги",
+            "unknown_terms": ["УСПД", "  "],
+        },
+        ensure_ascii=False,
+    )
+    pipe = RagPipeline(store=store, llm=FakeLLM(text=payload))
+
+    ans = pipe.answer("Меркурий не выходит на связь")
+
+    assert ans.instruction == "1. Суть\n2. Шаги"
+    assert ans.solution_found is True
+    assert ans.unknown_terms == ["УСПД"]  # пустые термины отброшены
+
+
+def test_answer_json_no_solution_found():
+    store = FakeStore(HITS)
+    payload = "```json\n" + json.dumps(
+        {"solution_found": False, "instruction": "нет решения", "unknown_terms": []},
+        ensure_ascii=False,
+    ) + "\n```"
+    pipe = RagPipeline(store=store, llm=FakeLLM(text=payload))
+
+    ans = pipe.answer("экзотический вопрос")
+
+    assert ans.solution_found is False
+    assert ans.instruction == "нет решения"
+
+
+def test_answer_non_json_falls_back_to_plain_text():
+    store = FakeStore(HITS)
+    pipe = RagPipeline(store=store, llm=FakeLLM(text="просто текст без json"))
+
+    ans = pipe.answer("Меркурий не выходит на связь")
+
+    assert ans.instruction == "просто текст без json"
+    assert ans.solution_found is True
+    assert ans.unknown_terms == []
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "\n\t"])

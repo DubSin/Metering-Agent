@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import datetime
 import logging
 
 from config import config
@@ -69,11 +70,13 @@ def process_ticket(
     subject: str | None = None,
     skip_existing: bool = False,
     chat_id: str | int | None = None,
+    daily_counter: bool = False,
 ) -> bool:
     """Обработать один тикет и отправить на ревью.
 
     text пустой → дотягиваем из HelpDesk (GET). skip_existing=True → пропускаем
-    уже отправленные тикеты (дедуп для поллера).
+    уже отправленные тикеты (дедуп для поллера). daily_counter=True → в сообщение
+    добавляется счётчик «N-й тикет за сегодня» (для авто-приёма из поллера).
     Возвращает True, если сообщение в Telegram отправлено.
     """
     task_id = str(task_id)
@@ -90,6 +93,9 @@ def process_ticket(
         log.warning("ticket %s: пустой текст, пропуск", task_id)
         return False
 
+    # Порядковый номер за сегодня = уже сохранённые сегодня + этот (ещё не записан).
+    daily_index = store.count_today() + 1 if daily_counter else None
+
     answer = get_pipeline().answer(text)
     send_for_review(
         ticket_id=task_id,
@@ -99,6 +105,9 @@ def process_ticket(
         sources=answer.sources,
         model=answer.model,
         chat_id=chat_id,
+        solution_found=answer.solution_found,
+        unknown_terms=answer.unknown_terms,
+        daily_index=daily_index,
     )
     return True
 
@@ -165,3 +174,102 @@ def fetch_and_review(
             else:
                 empty.append(tid)
     return {"found": len(tickets), "sent": sent, "skipped": skipped, "empty": empty}
+
+
+_DT_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def _parse_dt(s: str) -> datetime.datetime | None:
+    try:
+        return datetime.datetime.strptime((s or "").strip(), _DT_FMT)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ticket_date(ticket: dict) -> str:
+    """date_created тикета в формате HelpDesk ('YYYY-MM-DD HH:MM:SS') или ''."""
+    return str(ticket.get("date_created") or "").strip()
+
+
+def process_new_tickets(chat_id: str | int | None = None) -> dict:
+    """Поллер: обработать ТОЛЬКО новые тикеты (date_created новее водяного знака).
+
+    «Новизну» определяем по дате создания: запрашиваем у HelpDesk тикеты с
+    from_date_created = знак (фильтр включающий, проверено на API). Сервер сам
+    отдаёт только свежие тикеты, поэтому усечение по лимиту не теряет новые —
+    в отличие от выборки всех открытых. Дедуп уже обработанных — через
+    store.exists() (он же страхует от повторной отправки на границе секунды,
+    т.к. фильтр включающий и тикеты «ровно на знаке» приходят снова).
+
+    Водяной знак (date_created последнего тикета) хранится в store.meta и
+    переживает перезапуски — тикеты из простоя поллера подхватятся на следующем
+    проходе. Первый запуск только ставит знак «сейчас» и НЕ шлёт накопившийся
+    бэклог. Сводка: {found, sent, skipped, empty, watermark, initialized}.
+    """
+    raw = store.get_meta(store.META_POLLER_LAST_DATE)
+    statuses = config.fetch_statuses
+    limit = config.fetch_limit
+    sent: list[str] = []
+    skipped: list[str] = []
+    empty: list[str] = []
+
+    with make_client() as client:
+        # Первый запуск: знак = max(now, самый свежий из бэклога) + 1с, чтобы
+        # включающий фильтр на следующем проходе НЕ зацепил текущий бэклог
+        # (в т.ч. тикеты в ту же секунду). Бэклог не рассылаем.
+        if raw is None:
+            backlog = fetch_tickets(client, statuses, limit=limit)
+            newest = max(
+                (d for t in backlog if (d := _parse_dt(_ticket_date(t)))), default=None
+            )
+            base = max(datetime.datetime.now(), newest) if newest else datetime.datetime.now()
+            watermark = (base + datetime.timedelta(seconds=1)).strftime(_DT_FMT)
+            store.set_meta(store.META_POLLER_LAST_DATE, watermark)
+            log.info("поллер: инициализация водяного знака = %s (бэклог пропущен)", watermark)
+            return {
+                "found": len(backlog),
+                "sent": sent,
+                "skipped": skipped,
+                "empty": empty,
+                "watermark": watermark,
+                "initialized": True,
+            }
+
+        tickets = fetch_tickets(client, statuses, from_date=raw, limit=limit)
+        # По возрастанию даты создания (затем id) — чтобы счётчик за сегодня шёл по порядку.
+        tickets = sorted(
+            tickets,
+            key=lambda t: (_ticket_date(t), _parse_dt(_ticket_date(t)) is None, str(t.get("id"))),
+        )
+        watermark = raw
+        for t in tickets:
+            tid = str(t.get("id"))
+            date = _ticket_date(t)
+            if date > watermark:
+                watermark = date  # строки YYYY-MM-DD HH:MM:SS сравниваются хронологически
+            if store.exists(tid):
+                skipped.append(tid)  # уже обработан (в т.ч. повторно пришедший «на знаке»)
+                continue
+            text = ticket_text(client, t)
+            if process_ticket(
+                tid,
+                text,
+                subject=ticket_subject(t),
+                skip_existing=True,
+                chat_id=chat_id,
+                daily_counter=True,
+            ):
+                sent.append(tid)
+            else:
+                empty.append(tid)
+
+    if watermark > raw:
+        store.set_meta(store.META_POLLER_LAST_DATE, watermark)
+    return {
+        "found": len(tickets),
+        "sent": sent,
+        "skipped": skipped,
+        "empty": empty,
+        "watermark": watermark,
+        "initialized": False,
+    }

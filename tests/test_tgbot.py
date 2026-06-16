@@ -120,6 +120,25 @@ def test_build_message_truncates_long_instruction():
     assert msg.endswith("…")
 
 
+def test_build_message_no_solution_banner():
+    msg = notify.build_message("7", "решения нет", solution_found=False)
+    assert "В базе знаний нет готового решения" in msg
+    assert "Комментарий" in msg
+    assert "Предлагаемый ответ" not in msg
+
+
+def test_build_message_unknown_terms_block():
+    msg = notify.build_message("7", "инструкция", unknown_terms=["УСПД", "PLC-модем"])
+    assert "Терминов нет в базе знаний" in msg
+    assert "УСПД" in msg
+    assert "PLC-модем" in msg
+
+
+def test_build_message_no_unknown_terms_block_when_empty():
+    msg = notify.build_message("7", "инструкция", unknown_terms=[])
+    assert "Терминов нет в базе знаний" not in msg
+
+
 class FakeBot:
     def __init__(self):
         self.sent = None
@@ -174,6 +193,12 @@ def test_is_allowed(monkeypatch):
     assert is_allowed({"id": 999, "username": "Ivan"}) is True   # по username (без регистра)
     assert is_allowed({"id": 999, "username": "bob"}) is False
     assert is_allowed({"id": 999}) is False
+
+    # В группе/супергруппе доступ у всех участников — белый список игнорируется
+    assert is_allowed({"id": 999}, {"type": "group"}) is True
+    assert is_allowed({"id": 999, "username": "bob"}, {"type": "supergroup"}) is True
+    # В личке белый список по-прежнему действует
+    assert is_allowed({"id": 999}, {"type": "private"}) is False
 
 
 def test_build_ticket_picker():

@@ -59,7 +59,18 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
     created_at REAL NOT NULL,
     PRIMARY KEY (chat_id, message_id)
 );
+
+-- Произвольное key-value состояние процессов. Сейчас хранит водяной знак
+-- поллера (date_created последнего обработанного тикета), чтобы тянуть только новые.
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 """
+
+# Ключ meta: date_created последнего обработанного поллером тикета (водяной знак,
+# формат HelpDesk "YYYY-MM-DD HH:MM:SS"). Фильтр from_date_created — включающий.
+META_POLLER_LAST_DATE = "poller_last_date_created"
 
 
 def _db_path() -> Path:
@@ -207,6 +218,25 @@ def stats() -> dict:
     return {"total": sum(by_status.values()), "by_status": by_status}
 
 
+def _today_start(now: float | None = None) -> float:
+    """Epoch-время локальной полуночи сегодняшнего дня."""
+    import datetime
+
+    dt = datetime.datetime.fromtimestamp(now if now is not None else time.time())
+    midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight.timestamp()
+
+
+def count_today(now: float | None = None) -> int:
+    """Сколько ревью создано за сегодня (по локальной дате created_at)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM reviews WHERE created_at >= ?",
+            (_today_start(now),),
+        ).fetchone()
+        return int(row["c"]) if row else 0
+
+
 def iter_reviews(statuses: list[str] | None = None) -> list[dict]:
     """Все ревью (опц. с фильтром по статусам), новые — первыми."""
     with _connect() as conn:
@@ -276,6 +306,26 @@ def clear_ticket_messages(ticket_id: str) -> None:
     """Снять регистрацию сообщений по тикету (после решения)."""
     with _connect() as conn:
         conn.execute("DELETE FROM ticket_messages WHERE ticket_id=?", (str(ticket_id),))
+
+
+# --------------------------------------------------------------------------- #
+# meta (key-value состояние процессов)
+# --------------------------------------------------------------------------- #
+def get_meta(key: str) -> str | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key=?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+
+def set_meta(key: str, value: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, str(value)),
+        )
 
 
 def _s(v: str | int | None) -> str | None:

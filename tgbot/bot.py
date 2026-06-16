@@ -56,12 +56,16 @@ logging.basicConfig(
 log = logging.getLogger("tgbot")
 
 
-def is_allowed(user: dict) -> bool:
-    """Разрешён ли пользователю доступ к боту (белый список из config).
+def is_allowed(user: dict, chat: dict | None = None) -> bool:
+    """Разрешён ли пользователю доступ к боту.
 
-    Пустой список = открытый режим (пускаем всех). Совпадение по numeric id
-    или по @username (без учёта регистра).
+    В группах/супергруппах доступ есть у всех участников (бота добавили в чат
+    осознанно — значит, ему доверяет вся группа). В личных сообщениях работает
+    белый список из config: пустой список = открытый режим (пускаем всех),
+    иначе — совпадение по numeric id или по @username (без учёта регистра).
     """
+    if (chat or {}).get("type") in ("group", "supergroup"):
+        return True
     allowed = config.telegram.allowed_users
     if not allowed:
         return True
@@ -94,11 +98,12 @@ class ReviewBot:
         action, ticket_id = parse_callback(cq.get("data") or "")
         user = cq.get("from") or {}
         message = cq.get("message") or {}
-        chat_id = (message.get("chat") or {}).get("id")
+        chat = message.get("chat") or {}
+        chat_id = chat.get("id")
         message_id = message.get("message_id")
         who = operator_name(user)
 
-        if not is_allowed(user):
+        if not is_allowed(user, chat):
             self._ack(cq["id"], "Нет доступа")
             return
 
@@ -172,8 +177,8 @@ class ReviewBot:
     # message
     # ------------------------------------------------------------------ #
     def handle_message(self, msg: dict) -> None:
-        if not is_allowed(msg.get("from") or {}):
-            return  # пользователь не в белом списке — молча игнорируем
+        if not is_allowed(msg.get("from") or {}, msg.get("chat") or {}):
+            return  # личка вне белого списка — молча игнорируем (в группе пускаем всех)
 
         text = msg.get("text")
 

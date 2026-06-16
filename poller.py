@@ -22,27 +22,32 @@ import logging
 import threading
 
 from config import config
-from processing import fetch_and_review
+from processing import process_new_tickets
 
 log = logging.getLogger("poller")
 
 
 def poll_once() -> dict:
-    """Один проход опроса: подтянуть открытые тикеты и отправить новые на ревью.
+    """Один проход опроса: подтянуть ТОЛЬКО новые тикеты и отправить на ревью.
 
-    Возвращает сводку fetch_and_review: {found, sent, skipped, empty}.
+    Новизна определяется по водяному знаку (id последнего обработанного тикета),
+    поэтому старые открытые тикеты повторно не тянутся — только появившиеся после.
+    Возвращает сводку process_new_tickets: {found, sent, skipped, empty, watermark}.
     """
-    summary = fetch_and_review(
-        statuses=config.fetch_statuses,
-        limit=config.fetch_limit,
-    )
-    if summary.get("sent"):
+    summary = process_new_tickets()
+    if summary.get("initialized"):
         log.info(
-            "поллер: найдено=%s, отправлено=%s, пропущено=%s, пусто=%s",
+            "поллер: первый проход, водяной знак=%s — бэклог пропущен",
+            summary.get("watermark"),
+        )
+    elif summary.get("sent"):
+        log.info(
+            "поллер: найдено=%s, отправлено=%s, пропущено=%s, пусто=%s, знак=%s",
             summary.get("found"),
             len(summary["sent"]),
             len(summary.get("skipped", [])),
             len(summary.get("empty", [])),
+            summary.get("watermark"),
         )
     else:
         log.debug("поллер: новых тикетов нет (найдено=%s)", summary.get("found"))

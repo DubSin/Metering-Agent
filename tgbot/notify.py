@@ -62,11 +62,30 @@ def _format_sources(sources: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
+def _format_unknown_terms(unknown_terms: list[str] | None) -> str:
+    """Блок терминов из обращения, которых нет в базе знаний (модель их не поняла)."""
+    if not unknown_terms:
+        return ""
+    lines = ["", "<i>⚠️ Терминов нет в базе знаний:</i>"]
+    for t in unknown_terms[:15]:
+        term = html.escape(str(t)).strip()
+        if term:
+            lines.append(f"• {term}")
+    return "\n".join(lines)
+
+
+# Явная плашка, когда готового решения в базе знаний нет.
+_NO_SOLUTION_BANNER = "⚠️ <b>В базе знаний нет готового решения по этому обращению.</b>"
+
+
 def build_message(
     ticket_id: str,
     instruction: str,
     subject: str | None = None,
     sources: list[dict] | None = None,
+    solution_found: bool = True,
+    unknown_terms: list[str] | None = None,
+    daily_index: int | None = None,
 ) -> str:
     head = f'<b>Тикет #{html.escape(str(ticket_id))}</b>'
     if subject:
@@ -75,17 +94,33 @@ def build_message(
 
     body = html.escape(instruction or "—")
     sources_block = _format_sources(sources)
+    terms_block = _format_unknown_terms(unknown_terms)
 
-    parts = [head, link, "", "<b>Предлагаемый ответ:</b>", body]
+    answer_label = (
+        "<b>Предлагаемый ответ:</b>"
+        if solution_found
+        else "<b>Комментарий:</b>"
+    )
+    parts = [head, link]
+    if daily_index is not None:
+        # Счётчик за сегодня: этот тикет — N-й, и всего за сегодня пришло N.
+        parts.append(f"📊 {daily_index}-й тикет за сегодня (всего сегодня: {daily_index})")
+    parts.append("")
+    if not solution_found:
+        parts.append(_NO_SOLUTION_BANNER)
+    parts += [answer_label, body]
+    body_idx = len(parts) - 1
+    if terms_block:
+        parts.append(terms_block)
     if sources_block:
         parts.append(sources_block)
 
     # Точный бюджет на ответ: лимит минус всё остальное (заголовок, ссылка,
-    # подпись, источники, переводы строк) и минус символ «…».
+    # плашка, термины, источники, переводы строк) и минус символ «…».
     overhead = len("\n".join(parts)) - len(body) + 1
     budget = max(_MAX_TEXT - overhead, 0)
     if len(body) > budget:
-        parts[4] = body[:budget].rstrip() + "…"
+        parts[body_idx] = body[:budget].rstrip() + "…"
     return "\n".join(parts)
 
 
@@ -98,6 +133,9 @@ def send_for_review(
     model: str | None = None,
     client: BotClient | None = None,
     chat_id: str | int | None = None,
+    solution_found: bool = True,
+    unknown_terms: list[str] | None = None,
+    daily_index: int | None = None,
 ) -> int:
     """Отправить тикет на ревью и сохранить pending. Возвращает message_id.
 
@@ -109,7 +147,15 @@ def send_for_review(
     if not chat_id:
         raise ValueError("Не задан TELEGRAM_CHAT_ID")
 
-    text = build_message(ticket_id, instruction, subject=subject, sources=sources)
+    text = build_message(
+        ticket_id,
+        instruction,
+        subject=subject,
+        sources=sources,
+        solution_found=solution_found,
+        unknown_terms=unknown_terms,
+        daily_index=daily_index,
+    )
     result = bot.send_message(
         chat_id=chat_id,
         text=text,

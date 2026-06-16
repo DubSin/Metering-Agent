@@ -5,20 +5,17 @@ import poller
 from config import config
 
 
-def test_poll_once_uses_config(monkeypatch):
-    calls = {}
-    monkeypatch.setattr(config, "fetch_statuses", "open")
-    monkeypatch.setattr(config, "fetch_limit", 7)
+def test_poll_once_delegates_to_process_new(monkeypatch):
+    calls = {"n": 0}
 
-    def fake_fetch(statuses=None, limit=None):
-        calls["statuses"] = statuses
-        calls["limit"] = limit
-        return {"found": 2, "sent": ["1"], "skipped": ["2"], "empty": []}
+    def fake_process_new():
+        calls["n"] += 1
+        return {"found": 2, "sent": ["1"], "skipped": ["2"], "empty": [], "watermark": 1}
 
-    monkeypatch.setattr(poller, "fetch_and_review", fake_fetch)
+    monkeypatch.setattr(poller, "process_new_tickets", fake_process_new)
 
     summary = poller.poll_once()
-    assert calls == {"statuses": "open", "limit": 7}   # берёт значения из config
+    assert calls["n"] == 1                 # поллер тянет только новые тикеты
     assert summary["sent"] == ["1"]
 
 

@@ -77,7 +77,8 @@ class DeepSeekConfig:
     api_key: str = os.getenv("DEEPSEEK_API_KEY", "")  # сервер может не требовать ключа
     # Имя модели. Пусто → берём первую из GET /v1/models.
     model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-    temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.2"))
+    # 0 — детерминированные ответы строго по базе знаний, без фантазий.
+    temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0"))
     timeout: int = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
     # "minimal" — быстрый ответ без цепочки рассуждений. Пусто — не передаём.
     reasoning_effort: str = os.getenv("DEEPSEEK_REASONING_EFFORT", "minimal")
@@ -90,7 +91,8 @@ class OllamaConfig:
     api_key: str = os.getenv("OLLAMA_API_KEY", "ollama")  # Ollama ключ не проверяет
     # Имя модели. Пусто → берём первую из GET /v1/models.
     model: str = os.getenv("OLLAMA_MODEL", "")
-    temperature: float = float(os.getenv("OLLAMA_TEMPERATURE", "0.2"))
+    # 0 — детерминированные ответы строго по базе знаний, без фантазий.
+    temperature: float = float(os.getenv("OLLAMA_TEMPERATURE", "0"))
     timeout: int = int(os.getenv("OLLAMA_TIMEOUT", "120"))
 
 

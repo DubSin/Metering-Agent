@@ -121,10 +121,12 @@ def test_build_message_truncates_long_instruction():
 
 
 def test_build_message_no_solution_banner():
-    msg = notify.build_message("7", "решения нет", solution_found=False)
-    assert "В базе знаний нет готового решения" in msg
-    assert "Комментарий" in msg
-    assert "Предлагаемый ответ" not in msg
+    msg = notify.build_message("7", "предполагаемая инструкция", solution_found=False)
+    # Плашка предупреждает, что ответ предположительный...
+    assert "Прямой инструкции в базе знаний нет" in msg
+    # ...но инструкция всё равно приводится под обычным заголовком.
+    assert "Предлагаемый ответ" in msg
+    assert "предполагаемая инструкция" in msg
 
 
 def test_build_message_unknown_terms_block():

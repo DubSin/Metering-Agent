@@ -77,8 +77,9 @@ class DeepSeekConfig:
     api_key: str = os.getenv("DEEPSEEK_API_KEY", "")  # сервер может не требовать ключа
     # Имя модели. Пусто → берём первую из GET /v1/models.
     model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-    # 0 — детерминированные ответы строго по базе знаний, без фантазий.
-    temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0"))
+    # 0.2 — почти детерминированно (дословные команды/пароли из базы), но чуть живее
+    # формулировки. Предполагаемые инструкции обеспечивает промпт, а не температура.
+    temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.2"))
     timeout: int = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
     # "minimal" — быстрый ответ без цепочки рассуждений. Пусто — не передаём.
     reasoning_effort: str = os.getenv("DEEPSEEK_REASONING_EFFORT", "minimal")

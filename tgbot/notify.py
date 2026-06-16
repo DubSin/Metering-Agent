@@ -74,8 +74,12 @@ def _format_unknown_terms(unknown_terms: list[str] | None) -> str:
     return "\n".join(lines)
 
 
-# Явная плашка, когда готового решения в базе знаний нет.
-_NO_SOLUTION_BANNER = "⚠️ <b>В базе знаний нет готового решения по этому обращению.</b>"
+# Плашка, когда прямой инструкции в базе знаний нет: ответ предполагаемый,
+# инструкция всё равно приводится ниже (модель достроила её по общим принципам).
+_NO_SOLUTION_BANNER = (
+    "⚠️ <b>Прямой инструкции в базе знаний нет — ответ предположительный, "
+    "проверьте перед отправкой.</b>"
+)
 
 
 def build_message(
@@ -96,11 +100,8 @@ def build_message(
     sources_block = _format_sources(sources)
     terms_block = _format_unknown_terms(unknown_terms)
 
-    answer_label = (
-        "<b>Предлагаемый ответ:</b>"
-        if solution_found
-        else "<b>Комментарий:</b>"
-    )
+    # Инструкция приводится всегда (даже предполагаемая), поэтому заголовок единый.
+    answer_label = "<b>Предлагаемый ответ:</b>"
     parts = [head, link]
     if daily_index is not None:
         # Счётчик за сегодня: этот тикет — N-й, и всего за сегодня пришло N.

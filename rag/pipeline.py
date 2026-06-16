@@ -67,23 +67,27 @@ class RagPipeline:
             raise ValueError("Пустой текст тикета")
 
         hits = self.store.search(ticket, top_k=top_k)
+        # Даже без релевантных статей не отбиваемся «решения нет»: прогоняем через
+        # модель с пустым контекстом — она выдаёт предполагаемую инструкцию по
+        # общим принципам АИИС КУЭ. Прямой инструкции в базе нет → solution_found=False.
         if not hits:
-            log.info("RAG: релевантных статей не найдено")
-            return RagAnswer(
-                instruction=NO_CONTEXT, sources=[], solution_found=False
-            )
+            log.info("RAG: релевантных статей не найдено — предполагаемая инструкция")
+            context = NO_CONTEXT
+        else:
+            context = self._format_context(hits)
 
         messages = [
             {"role": "system", "content": RAG_SYSTEM},
             {
                 "role": "user",
-                "content": USER_TEMPLATE.format(
-                    ticket=ticket, context=self._format_context(hits)
-                ),
+                "content": USER_TEMPLATE.format(ticket=ticket, context=context),
             },
         ]
         out = self.llm.chat(messages)
         instruction, solution_found, unknown_terms = self._parse_output(out["text"])
+        # Без статей готового решения в базе быть не может — фиксируем флаг жёстко.
+        if not hits:
+            solution_found = False
         return RagAnswer(
             instruction=instruction,
             sources=self._sources(hits),

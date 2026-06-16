@@ -77,18 +77,25 @@ def test_answer_builds_context_and_returns_sources():
     assert len(ans.sources) == 2
 
 
-def test_answer_no_hits_skips_llm():
+def test_answer_no_hits_still_calls_llm_for_presumed_instruction():
     store = FakeStore([])
-    llm = FakeLLM()
+    payload = json.dumps(
+        {"solution_found": True, "instruction": "1. Суть\n2. Шаги", "unknown_terms": []},
+        ensure_ascii=False,
+    )
+    llm = FakeLLM(text=payload)
     pipe = RagPipeline(store=store, llm=llm)
 
     ans = pipe.answer("вопрос без ответа в базе")
 
-    assert ans.instruction == NO_CONTEXT
+    # LLM вызван и выдал предполагаемую инструкцию...
+    assert llm.messages is not None
+    assert ans.instruction == "1. Суть\n2. Шаги"
     assert ans.sources == []
+    # ...но без статей в базе прямого решения быть не может — флаг принудительно False.
     assert ans.solution_found is False
-    assert ans.unknown_terms == []
-    assert llm.messages is None  # LLM не вызывался
+    # В контекст модели подставлена заглушка NO_CONTEXT.
+    assert NO_CONTEXT in llm.messages[1]["content"]
 
 
 def test_answer_parses_json_solution_and_terms():

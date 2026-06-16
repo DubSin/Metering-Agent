@@ -22,8 +22,9 @@ ACTION_APPROVE = "approve"
 ACTION_DECLINE = "decline"
 ACTION_ANSWER = "answer"
 
-# Лимит сообщения Telegram — 4096 символов; оставляем запас под разметку.
-_MAX_TEXT = 3500
+# Жёсткий предел текста сообщения Telegram (sendMessage) — 4096 символов,
+# считается вместе с HTML-разметкой. Режем ровно по нему.
+_MAX_TEXT = 4096
 
 
 def build_keyboard(ticket_id: str) -> dict:
@@ -75,15 +76,16 @@ def build_message(
     body = html.escape(instruction or "—")
     sources_block = _format_sources(sources)
 
-    # бюджет на инструкцию = лимит минус заголовок/ссылка/источники
-    overhead = len(head) + len(link) + len(sources_block) + 32
-    budget = max(_MAX_TEXT - overhead, 500)
-    if len(body) > budget:
-        body = body[:budget].rstrip() + "…"
-
     parts = [head, link, "", "<b>Предлагаемый ответ:</b>", body]
     if sources_block:
         parts.append(sources_block)
+
+    # Точный бюджет на ответ: лимит минус всё остальное (заголовок, ссылка,
+    # подпись, источники, переводы строк) и минус символ «…».
+    overhead = len("\n".join(parts)) - len(body) + 1
+    budget = max(_MAX_TEXT - overhead, 0)
+    if len(body) > budget:
+        parts[4] = body[:budget].rstrip() + "…"
     return "\n".join(parts)
 
 

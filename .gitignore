@@ -31,3 +31,5 @@ Thumbs.db
 *.sqlite3-shm
 /dataset.jsonl
 /declines.jsonl
+
+run.log

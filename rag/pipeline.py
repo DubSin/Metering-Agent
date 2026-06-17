@@ -13,6 +13,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from .directory import Directory, get_directory
 from .llm import DeepSeekClient, make_llm
 from .prompts import NO_CONTEXT, RAG_SYSTEM, USER_TEMPLATE
 from .vector_store import VectorStore
@@ -36,9 +37,12 @@ class RagPipeline:
         self,
         store: VectorStore | None = None,
         llm: DeepSeekClient | None = None,
+        directory: Directory | None = None,
     ) -> None:
         self.store = store or VectorStore()
         self.llm = llm or make_llm()
+        # Справочник клиентов/owner: расшифровка кодов и сокращений из тикета.
+        self.directory = directory if directory is not None else get_directory()
 
     @staticmethod
     def _format_context(hits: list[dict]) -> str:
@@ -76,11 +80,18 @@ class RagPipeline:
         else:
             context = self._format_context(hits)
 
+        # Справочник клиентов: точные совпадения owner/название/домен в тексте
+        # тикета — отдаём LLM отдельным блоком (помогает раскрыть unknown_terms).
+        directory_block = self.directory.format_block(self.directory.match(ticket))
+        directory_section = f"{directory_block}\n" if directory_block else ""
+
         messages = [
             {"role": "system", "content": RAG_SYSTEM},
             {
                 "role": "user",
-                "content": USER_TEMPLATE.format(ticket=ticket, context=context),
+                "content": USER_TEMPLATE.format(
+                    ticket=ticket, directory=directory_section, context=context
+                ),
             },
         ]
         out = self.llm.chat(messages)

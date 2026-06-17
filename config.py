@@ -106,6 +106,9 @@ class RagConfig:
     # Локальная эмбеддинг-модель (fastembed). Мультиязычная — нужна для русского.
     embed_model: str = os.getenv("EMBED_MODEL", "intfloat/multilingual-e5-large")
     kb_dir: str = os.getenv("KB_DIR", "./knowledge_base")
+    # xlsx-справочник клиентов/owner (расшифровка кодов и сокращений из тикета).
+    # Файла нет → пайплайн работает без справочника.
+    directory_path: str = os.getenv("DIRECTORY_XLSX", "./data/clients.xlsx")
     chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "1200"))
     chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "200"))
     top_k: int = int(os.getenv("RAG_TOP_K", "6"))

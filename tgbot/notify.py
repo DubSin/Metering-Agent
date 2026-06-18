@@ -104,8 +104,8 @@ def build_message(
     answer_label = "<b>Предлагаемый ответ:</b>"
     parts = [head, link]
     if daily_index is not None:
-        # Счётчик за сегодня: этот тикет — N-й, и всего за сегодня пришло N.
-        parts.append(f"📊 {daily_index}-й тикет за сегодня (всего сегодня: {daily_index})")
+        # Счётчик за сегодня: этот тикет — N-й по счёту.
+        parts.append(f"📊 {daily_index}-й тикет за сегодня")
     parts.append("")
     if not solution_found:
         parts.append(_NO_SOLUTION_BANNER)

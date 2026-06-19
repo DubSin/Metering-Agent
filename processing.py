@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time
 
 from config import config
 from rag.llm import make_llm
@@ -86,9 +87,15 @@ def process_ticket(
 
     text = (text or "").strip()
     if not text:
+        t_fetch = time.perf_counter()
         fetched = get_ticket_text(task_id)
         text = (fetched.get("text") or "").strip()
         subject = subject or fetched.get("subject")
+        log.info(
+            "ticket %s: текст дотянут из HelpDesk за %.2fc",
+            task_id,
+            time.perf_counter() - t_fetch,
+        )
     if not text:
         log.warning("ticket %s: пустой текст, пропуск", task_id)
         return False
@@ -96,7 +103,10 @@ def process_ticket(
     # Порядковый номер за сегодня = уже сохранённые сегодня + этот (ещё не записан).
     daily_index = store.count_today() + 1 if daily_counter else None
 
+    t_start = time.perf_counter()
     answer = get_pipeline().answer(text)
+    t_answer = time.perf_counter() - t_start
+    t_send_start = time.perf_counter()
     send_for_review(
         ticket_id=task_id,
         instruction=answer.instruction,
@@ -108,6 +118,14 @@ def process_ticket(
         solution_found=answer.solution_found,
         unknown_terms=answer.unknown_terms,
         daily_index=daily_index,
+    )
+    t_send = time.perf_counter() - t_send_start
+    log.info(
+        "ticket %s обработан: RAG %.2fc, отправка %.2fc, всего %.2fc",
+        task_id,
+        t_answer,
+        t_send,
+        time.perf_counter() - t_start,
     )
     return True
 

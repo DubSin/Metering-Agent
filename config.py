@@ -138,6 +138,14 @@ class AppConfig:
     fetch_limit: int = int(os.getenv("FETCH_LIMIT", "20"))        # сколько тикетов за раз
     # Интервал автоопроса HelpDesk поллером (секунды). По умолчанию 20 минут.
     poll_interval: int = int(os.getenv("POLL_INTERVAL", "1200"))
+    # Логирование. Пишем и в консоль (видно в tmux вживую), и в файл с ротацией.
+    # LOG_FILE пусто → только консоль. Путь создаётся при старте.
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    log_file: str = os.getenv("LOG_FILE", "./logs/agent.log")
+    # Ротация: при достижении log_max_bytes файл переоткрывается, хранится
+    # log_backups старых копий (agent.log.1 … .N). 10 МБ × 5 = ~50 МБ потолок.
+    log_max_bytes: int = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+    log_backups: int = int(os.getenv("LOG_BACKUPS", "5"))
 
 
 config = AppConfig()

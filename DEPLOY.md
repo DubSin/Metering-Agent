@@ -222,8 +222,14 @@ python -m rag.ask "как массово внести метки в ЮС"
 mkdir -p ~/metering-agent/logs
 launchctl load  ~/Library/LaunchAgents/tech.lar.metering-agent.plist
 launchctl list | grep metering          # проверить, что запущен
-tail -f ~/metering-agent/logs/agent.err.log   # логи (logging пишет в stderr)
+tail -f ~/metering-agent/logs/agent.log       # логи приложения (LOG_FILE, с ротацией)
 ```
+
+> Приложение само пишет логи в `LOG_FILE` (по умолчанию `./logs/agent.log`)
+> с ротацией — и одновременно в консоль/stderr. Поэтому при запуске в tmux
+> отдельный редирект `>> agent.log 2>&1` не нужен: достаточно `tail -f`
+> файла из `LOG_FILE`. Уровень и размер ротации — `LOG_LEVEL`/`LOG_MAX_BYTES`/
+> `LOG_BACKUPS` (см. `.env.example`).
 
 Управление:
 

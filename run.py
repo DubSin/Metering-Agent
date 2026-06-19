@@ -23,6 +23,7 @@ import argparse
 import logging
 import sys
 import threading
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,10 +35,43 @@ try:
 except ImportError:
     pass
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s | %(message)s",
-)
+from config import config
+
+
+def _setup_logging() -> None:
+    """Логи в консоль (видно в tmux вживую) и в файл с ротацией (LOG_FILE).
+
+    Один формат для обоих приёмников. Файл переоткрывается по достижении
+    LOG_MAX_BYTES, хранится LOG_BACKUPS копий — лог не растёт безгранично.
+    LOG_FILE пусто → только консоль (поведение как раньше). Сбой открытия
+    файла (нет прав/диска) не валит запуск — остаёмся на консоли.
+    """
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s | %(message)s")
+    root = logging.getLogger()
+    root.setLevel(config.log_level.upper())
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    if config.log_file:
+        try:
+            path = Path(config.log_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                path,
+                maxBytes=config.log_max_bytes,
+                backupCount=config.log_backups,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(fmt)
+            root.addHandler(file_handler)
+        except OSError:
+            root.warning("Не удалось открыть LOG_FILE=%s — пишу только в консоль",
+                         config.log_file, exc_info=True)
+
+
+_setup_logging()
 log = logging.getLogger("run")
 
 

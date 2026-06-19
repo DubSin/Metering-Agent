@@ -35,3 +35,7 @@ Thumbs.db
 run.log
 token.txt
 
+# Логи приложения (LOG_FILE с ротацией)
+/logs/
+*.log
+

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import logging
 import threading
+import time
 
 from config import config
 from processing import process_new_tickets
@@ -34,15 +35,19 @@ def poll_once() -> dict:
     поэтому старые открытые тикеты повторно не тянутся — только появившиеся после.
     Возвращает сводку process_new_tickets: {found, sent, skipped, empty, watermark}.
     """
+    t_start = time.perf_counter()
     summary = process_new_tickets()
+    elapsed = time.perf_counter() - t_start
     if summary.get("initialized"):
         log.info(
-            "поллер: первый проход, водяной знак=%s — бэклог пропущен",
+            "поллер: первый проход за %.2fc, водяной знак=%s — бэклог пропущен",
+            elapsed,
             summary.get("watermark"),
         )
     elif summary.get("sent"):
         log.info(
-            "поллер: найдено=%s, отправлено=%s, пропущено=%s, пусто=%s, знак=%s",
+            "поллер: проход за %.2fc — найдено=%s, отправлено=%s, пропущено=%s, пусто=%s, знак=%s",
+            elapsed,
             summary.get("found"),
             len(summary["sent"]),
             len(summary.get("skipped", [])),
@@ -50,7 +55,11 @@ def poll_once() -> dict:
             summary.get("watermark"),
         )
     else:
-        log.debug("поллер: новых тикетов нет (найдено=%s)", summary.get("found"))
+        log.debug(
+            "поллер: новых тикетов нет за %.2fc (найдено=%s)",
+            elapsed,
+            summary.get("found"),
+        )
     return summary
 
 
